@@ -326,6 +326,8 @@ class QuantizationPreset(Enum):
         raise RuntimeError('Unknown preset string.')
 
     def get_params_configured_by_preset(self, quant_group: QuantizerGroup) -> Dict:
+        from nncf.common.utils.logger import logger as nncf_logger
+        nncf_logger.error("NNCF_PRESET: quant_group={} : self={}".format(quant_group, self))
         if quant_group == QuantizerGroup.ACTIVATIONS and self == QuantizationPreset.MIXED:
             return  {'mode': QuantizationMode.ASYMMETRIC}
         return {'mode' : QuantizationMode.SYMMETRIC}
