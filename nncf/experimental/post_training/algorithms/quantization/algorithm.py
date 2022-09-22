@@ -131,9 +131,13 @@ class PostTrainingQuantization(CompositeAlgorithm):
             for algorithm, parameters in self.algorithms_to_created.items():
                 if algorithm == PostTrainingAlgorithms.MinMaxQuantization:
                     min_max_algo = ONNXMinMaxQuantization(parameters)
+<<<<<<< HEAD
                     min_max_algo.model_transformer = self.model_transformer
                     self.algorithms.append(min_max_algo)
         if algorithm == PostTrainingAlgorithms.FastBiasCorrection:
             fast_bc_algo = FastBiasCorrection(parameters)
             fast_bc_algo.model_transformer = self.model_transformer
             self.algorithms.append(fast_bc_algo)
+=======
+                    self.algorithms.append(min_max_algo)
+>>>>>>> origin/develop

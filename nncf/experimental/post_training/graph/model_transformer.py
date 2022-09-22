@@ -12,7 +12,6 @@
 """
 
 from abc import ABC
-from abc import abstractmethod
 from typing import List
 from typing import TypeVar
 
@@ -60,15 +59,15 @@ class StaticModelTransformerBase(ModelTransformer, ABC):
         self._apply_transformations(transformation_layout.transformations)
         return self._model
 
-    @abstractmethod
     def _apply_transformations(self, transformations: List[TransformationCommand]) -> None:
         """
         Applies transformations by type-callback on the model
 
         :param transformations: lisf of the TransformationCommand transformations
         """
+        raise NotImplementedError(
+            '_apply_transformations method must be implemented before call')
 
-    @abstractmethod
     def _get_transformation_layout_extra_outputs(
             self,
             statistic_points: StatisticPointsContainer) -> TransformationLayout:
@@ -78,16 +77,18 @@ class StaticModelTransformerBase(ModelTransformer, ABC):
         :param statistic_points: StatisticPointsContainer
         :return: transformation_layout
         """
+        raise NotImplementedError(
+            '_get_transformation_layout_extra_outputs method must be implemented before call')
 
-    @abstractmethod
     def _apply_quantizer_insertion_transformations(self, transformations: List[TransformationCommand]) -> None:
         """
         Applies quantizer insertion transformations to the model
 
         :param transformations: lisf of the TransformationCommand transformations
         """
+        raise NotImplementedError(
+            '_apply_quantizer_insertion_transformations method must be implemented before call')
 
-    @abstractmethod
     def _apply_output_insertion_transformations(self, transformations: List[TransformationCommand]) -> None:
         """
         Applies output insertion transformations to the model
@@ -95,7 +96,6 @@ class StaticModelTransformerBase(ModelTransformer, ABC):
         :param transformations: list of the TransformationCommand transformations
         """
 
-    @abstractmethod
     def _apply_bias_correction_transformations(self, transformations: List[TransformationCommand]) -> None:
         """
         Applies incoming transformations to the model

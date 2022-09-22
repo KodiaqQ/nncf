@@ -331,6 +331,7 @@ class ONNXModelTransformer(StaticModelTransformerBase):
                 bias_shift_magnitude = np.max(np.abs(transformation.bias_value / current_bias_value))
 
             if bias_shift_magnitude < 2.0:
+                # TODO: Add logging
                 print(f'{node_name} bias was changed')
                 bias_initializer.CopyFrom(new_bias_tensor)
             else:
