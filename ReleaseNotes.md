@@ -1,5 +1,59 @@
 # Release Notes
 
+## New in Release 2.5.0
+Quantization-Aware Training:
+- New Features:
+  - Added Patcher class from OTX, which is used for monkey patching.
+  - (PyTorch, Tensorflow) Add `prepare_for_inference` that convert compressed model to inference in backend format without NNCF specific operations (with int4 support).
+  - Added `save_for_netron()` method for NNCFGraph.
+- Fixes:
+  - Fixed traced tensors to implement the YOLOv8 from Ultralytics.
+  - Fixed statistics computation for pruned layers.
+- Improvements:
+  - Added deprecation decorator (to mark the entities as deprecated in NNCF).
+  - Extension of attributes (`transpose/permute/getitem`) for pruning node selector.
+  - NNCFNetwork was refactored from a wrapper-approach to a mixin-like approach.
+  - Added configuration for Accuracy Aware (pruning + quantization) for Resnet18 on CIFAR10.
+  - Added average pool 3d-like ops to pruning maskAdded Conv3d for overflow fix.
+  - Added patching for PyTorch (`jit.script_if_tracing`).
+  - Added `__matmul__` magic functions to the list of patched ops (for SwinTransformer by Microsoft).
+  - Added `set_log_file()` method was added for NNCF logger.
+  - Added support for pruning of `torch.nn.functional.pad` operation.
+  - Added `torch.baddbmm` as an alias for the matmul metatype for quantization purposes.
+- Requirements:
+  - (ONNX) Updated requirements for samples.
+  - Updated ONNX version (1.13)
+- Docs:
+  - Update eval results in tables across READMEs and align Tensorflow model names with PyTorch.
+  - Multiple docs updates (fixes, improvements, etc.).
+
+Post-Training Quantization:
+- Features:
+  - (OpenVINO) Added weights compression after quantization.
+  - (OpenVINO) Added support of the Depthwise & GroupConvolution layers support for correct quantization.
+  - (OpenVINO) Added Quantization with accuracy control algorithm.
+  - (OpenVINO) Added YOLOv8 examples for [quantization](examples/post_training_quantization/openvino/yolov8) & [quantization with accuracy control](examples/post_training_quantization/openvino/yolov8_quantize_with_accuracy_control).
+  - (OpenVINO, ONNX) Added BiasCorrection algorithm support.
+  - (PyTorch) Added MinMaxAlgorithm support.
+  - (OpenVINO) Added support for dynamic-shape models.
+  - (OpenVINO) Added GRU/LSTM quantization support.
+  - (OpenVINO) Added quantizer scales unification.
+  - Added `"overflow_fix"` parameter support.
+  - Added `"model_type"` parameter support.
+  - Added `"inplace_statistics"` support (reduce memory stamp during quantization).
+  - Added `nncf.parameters.IgnoredScope` support.
+- Fixes:
+  - Fixed several bugs which lead to performance drop.
+  - Checking correct ONNX opset version via the `nncf.quantize(...)`.
+  - Fixed ignored_scope attribute behaviour (for weights).
+- Improvements:
+  - (OpenVINO) Added support for per-tensor & per-channel quantization.
+  - Added improvements for statistic collection process (collect statistics only once).
+  - (PyTorch, OpenVINO, ONNX) Introduced unified quantizer parameters calculation.
+  - Improvements for pipeline speed up (transformations usage in ModelTransformer).
+  - (OpenVINO) Aligned parameters for FP16 models.
+  - (OpenVINO) Aligned patterns between POT & NNCF.
+
 ## New in Release 2.4.0
 Target version updates:
 - Bump target framework versions to PyTorch 1.13.1, TensorFlow 2.8.x, ONNX 1.12, ONNXRuntime 1.13.1
