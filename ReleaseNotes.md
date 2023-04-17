@@ -3,21 +3,22 @@
 ## New in Release 2.5.0
 Compression-aware training:
 - New Features:
-  - Added Patcher class from OTX, which is used for patching the models that can not be wrapped properly.
-  - (PyTorch, Tensorflow) Added `strip` that convert compressed model to inference in backend format without NNCF specific operations (with int4 support).
+  - Added `nncf.common.utils.patcher.Patcher` - this class can be used to patch methods on live PyTorch model objects with wrappers such as `nncf.torch.dynamic_graph.context.no_nncf_trace` when doing so in the model code is not possible (e.g. if the model comes from an external library package).
+  - Compression controllers of the `nncf.api.compression.CompressionAlgorithmController` class now have a `.strip()` method that will return the compressed model object with as many custom NNCF additions removed as possible while preserving the functioning of the model object as a compressed model.
 - Fixes:
-  - Fixed traced tensors to implement the YOLOv8 from Ultralytics.
   - Fixed statistics computation for pruned layers.
+  - (PyTorch) Fixed traced tensors to implement the YOLOv8 from Ultralytics.
 - Improvements:
   - Extension of attributes (`transpose/permute/getitem`) for pruning node selector.
   - NNCFNetwork was refactored from a wrapper-approach to a mixin-like approach.
-  - Added configuration for Accuracy Aware (pruning + quantization) for Resnet18 on CIFAR10.
-  - Added average pool 3d-like ops to pruning maskAdded Conv3d for overflow fix.
-  - Fixed JIT-traceable PyTorch models with internal patching.
-  - Added `__matmul__` magic functions to the list of patched ops (for SwinTransformer by Microsoft).
-  - Added `set_log_file()` method was added for NNCF logger.
+  - Added average pool 3d-like ops to pruning mask.
+  - Added Conv3d for overflow fix.
+  - `nncf.set_log_file(...)` can now be used to set location of the NNCF log file.
   - Added support for pruning of `torch.nn.functional.pad` operation.
-  - Added `torch.baddbmm` as an alias for the matmul metatype for quantization purposes.
+  - (PyTorch) Added `torch.baddbmm` as an alias for the matmul metatype for quantization purposes.
+  - (PyTorch) Added config file for ResNet18 accuracy-aware pruning + quantization on CIFAR10.
+  - (PyTorch) Fixed JIT-traceable PyTorch models with internal patching.
+  - (PyTorch) Added `__matmul__` magic functions to the list of patched ops (for SwinTransformer by Microsoft).
 - Requirements:
   - Updated ONNX version (1.13)
 - Docs:
@@ -40,8 +41,8 @@ Post-training compression:
   - (PyTorch) Added MinMaxAlgorithm support.
 - Fixes:
   - Fixed several bugs which lead to performance drop (added a number of patterns, corrected quantizer parameters calculation, etc.).
-  - Checking correct ONNX opset version via the `nncf.quantize(...)`. For now, models with opset < 13 optimizes correctly in per-tensor quantization.
   - Fixed `ignored_scope` attribute behaviour for weights. Now, the weighted layers excludes from optimization scope correctly.
+  - (ONNX) Checking correct ONNX opset version via the `nncf.quantize(...)`. For now, models with opset < 13 optimizes correctly in per-tensor quantization.
 - Improvements:
   - Improvements for pipeline speed up (transformations usage in ModelTransformer).
   - Added improvements for statistic collection process (collect statistics only once).
