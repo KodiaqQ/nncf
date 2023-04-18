@@ -14,7 +14,10 @@
 from typing import Dict, List, TypeVar, Union, Optional
 from collections import deque
 
+import os
+import json
 import numpy as np
+import openvino.runtime as ov
 
 from nncf import Dataset
 from nncf import nncf_logger
@@ -334,10 +337,18 @@ class BiasCorrection(Algorithm):
         """
         output_fp = self._get_fp_outputs(statistic_points, node.node_name)
         output_tensor_name = self._backend_entity.get_output_name(model, node.node_name)
+
+        file_handler = nncf_logger.handlers[-1]
+        if hasattr(file_handler, 'baseFilename'):
+            logging_dir = os.path.dirname(file_handler.baseFilename)
+            ov.serialize(model, os.path.join(logging_dir, 'bc_sub_' + node.node_name + '.xml'))
+
         engine = EngineFactory.create(model)
         channel_axis = node.metatype.output_channel_axis
         q_outputs = []
-        for feed_dict in feed_dicts:
+        for feed_id, feed_dict in enumerate(feed_dicts):
+            with open(os.path.join(logging_dir, 'bc_sub_' + node.node_name + '_' + str(feed_id) + '.json'), 'w') as file:
+                json.dump(json.dumps({key: value.flatten().tolist() for key, value in feed_dict.items()}), file)
             q_output = engine.infer(feed_dict)
             q_output = self._backend_entity.process_model_output(q_output, output_tensor_name)
             q_outputs.append(self._backend_entity.tensor_processor.mean_per_channel(q_output, channel_axis).tensor)

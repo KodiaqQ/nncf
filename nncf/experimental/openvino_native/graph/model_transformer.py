@@ -15,12 +15,10 @@ from typing import List, Tuple, Dict, Callable
 from collections import deque
 from collections import defaultdict
 
-import os
 import numpy as np
 import openvino.runtime as ov
 from openvino.runtime import opset9 as opset
 
-from nncf import nncf_logger
 from nncf.common.graph.model_transformer import ModelTransformer
 from nncf.common.graph.model_transformer import TModel
 from nncf.common.graph.transformations.layout import TransformationLayout
@@ -34,7 +32,6 @@ from nncf.experimental.openvino_native.graph.transformations.commands import OVB
 from nncf.experimental.openvino_native.graph.transformations.commands import OVFQNodeRemovingCommand
 from nncf.experimental.openvino_native.graph.transformations.commands import OVWeightUpdateCommand
 from nncf.experimental.openvino_native.graph.node_utils import get_result_node_name
-
 
 
 class OVModelTransformer(ModelTransformer):
@@ -358,14 +355,7 @@ class OVModelTransformer(ModelTransformer):
         if not results:
             results = model.get_results()
 
-        new_model = ov.Model(results, params)
-
-        file_handler = nncf_logger.handlers[-1]
-        if hasattr(file_handler, 'baseFilename'):
-            logging_dir = os.path.dirname(file_handler.baseFilename)
-            inputs_str = '_'.join(transformation.inputs)
-            ov.serialize(new_model, os.path.join(logging_dir, 'bc_sub_' + inputs_str + '.xml'))
-        return new_model
+        return ov.Model(results, params)
 
     @staticmethod
     def _apply_insert_operation(model: ov.Model,
