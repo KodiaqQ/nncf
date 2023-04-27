@@ -3,21 +3,20 @@
 ## New in Release 2.5.0
 Post-training Quantization:
 - Features:
-  - Added `"overflow_fix"` parameter support (improved accuracy for optimized model for affected devices).
-  - Added `"model_type"` parameter support that allows reach better accuracy for specific model architectures (e.g. transformers).
-  - Added `"inplace_statistics"` support (reduce memory footprint during optimization).
-  - Added `nncf.parameters.IgnoredScope` parameter support that allows exclude layers from optimization scope in different ways.
-  - (OpenVINO) Introduced post-training support for backend.
+  - Added Post-training Quantization support for OpenVINO IR (OpenVINO backend).
+  - Added `"overflow_fix"` parameter (for `quantize(...)` & `quantize_with_accuracy_control(...)` methods) support & functionality. It improves accuracy for optimized model for affected devices.
+  - Added `"model_type"` parameter (for `quantize(...)` & `quantize_with_accuracy_control(...)` methods) support that allows reach better accuracy for specific model architectures (e.g. transformers).
+  - Added support for in-place statistics collection (reduce memory footprint during optimization).
+  - Added `nncf.parameters.IgnoredScope` parameter (for `quantize(...)` & `quantize_with_accuracy_control(...)` methods) support that allows exclude layers from optimization scope in different ways.
   - (OpenVINO) Added Quantization with accuracy control algorithm.
   - (OpenVINO) Added weights compression after quantization (reduced .bin size of the optimized model).
   - (OpenVINO) Added support of the Depthwise & GroupConvolution layers support for correct quantization.
-  - (OpenVINO) Added YOLOv8 examples for [quantization](examples/post_training_quantization/openvino/yolov8) & [quantization with accuracy control](examples/post_training_quantization/openvino/yolov8_quantize_with_accuracy_control).
+  - (OpenVINO) Added YOLOv8 examples for [`quantize(...)`](examples/post_training_quantization/openvino/yolov8) & [`quantize_with_accuracy_control(...)`](examples/post_training_quantization/openvino/yolov8_quantize_with_accuracy_control) methods.
   - (OpenVINO) Added support for dynamic-shape models.
   - (OpenVINO) Added GRU/LSTM quantization support.
   - (OpenVINO) Added quantizer scales unification.
   - (OpenVINO, ONNX) Added BiasCorrection algorithm support.
   - (PyTorch) Added MinMaxAlgorithm support.
-  - (PyTorch) Added FastBiasCorrection support.
 - Fixes:
   - Fixed `ignored_scope` attribute behaviour for weights. Now, the weighted layers excludes from optimization scope correctly.
   - (ONNX) Checking correct ONNX opset version via the `nncf.quantize(...)`. For now, models with opset < 13 optimizes correctly in per-tensor quantization.
