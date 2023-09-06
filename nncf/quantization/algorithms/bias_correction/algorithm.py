@@ -36,7 +36,7 @@ from nncf.quantization.algorithms.bias_correction.backend import ALGO_BACKENDS
 
 TModel = TypeVar("TModel")
 
-BIAS_CORRECTION_THRESHOLD = 1000
+BIAS_CORRECTION_THRESHOLD = 999
 OUTPUT_PORT_OF_NODE = 0
 
 
