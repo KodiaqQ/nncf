@@ -11,12 +11,6 @@ jobs:
       - uses: actions/labeler@v4
         with:
           repo-token: "${{ secrets.GITHUB_TOKEN }}"
-          configuration-path: '.github/action_configs/labeler.yml'
-          sync-labels: true
-      - uses: actions/labeler@v4
-        if: contains(github.event.pull_request.base.ref, 'release_v')
-        with:
-          github-token: ${{ secrets.ADD_LABELS_WITH_REST_API }}
           script: |
             github.rest.issues.addLabels({
               issue_number: context.issue.number,
@@ -24,3 +18,8 @@ jobs:
               repo: context.repo.repo,
               labels: ["release_target"]
             })
+      - uses: actions/labeler@v4
+        with:
+          repo-token: "${{ secrets.GITHUB_TOKEN }}"
+          configuration-path: '.github/action_configs/labeler.yml'
+          sync-labels: true
