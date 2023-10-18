@@ -21,6 +21,7 @@ from nncf.common.graph.transformations.commands import TargetType
 from nncf.common.utils.backend import BackendType
 from nncf.experimental.common.tensor_statistics.collectors import MaxAggregator
 from nncf.experimental.common.tensor_statistics.collectors import TensorCollector
+from nncf.openvino.graph.metatypes.groups import QUANTIZE_AGNOSTIC_OPERATIONS
 from nncf.openvino.graph.metatypes.openvino_metatypes import OVConvolutionMetatype
 from nncf.openvino.graph.metatypes.openvino_metatypes import OVMatMulMetatype
 from nncf.openvino.graph.node_utils import get_channel_agnostic_reduction_axes
@@ -44,6 +45,10 @@ class OVSmoothQuantAlgoBackend(SmoothQuantAlgoBackend):
     @property
     def matmul_metatype(self) -> OperatorMetatype:
         return OVMatMulMetatype
+
+    @property
+    def quantize_agnostic_metatypes(self) -> List[OperatorMetatype]:
+        return QUANTIZE_AGNOSTIC_OPERATIONS
 
     @staticmethod
     def target_point(target_type: TargetType, target_node_name: str, port_id: int) -> OVTargetPoint:
