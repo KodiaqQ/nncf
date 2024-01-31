@@ -348,7 +348,7 @@ class OVModelTransformer(ModelTransformer):
             shift = OVModelTransformer._convert_to_fp16(shift)
             dtype = ov.Type.f16
 
-        destination_type = fake_convert_params.destination_type.value
+        destination_type = getattr(ov.Type, fake_convert_params.destination_type.value)
         scale = OVModelTransformer._create_constant(scale, dtype=dtype, name=f"{fake_convert_name}/scale")
         shift = OVModelTransformer._create_constant(shift, dtype=dtype, name=f"{fake_convert_name}/shift")
 
