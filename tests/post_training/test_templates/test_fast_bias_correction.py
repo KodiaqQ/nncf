@@ -67,7 +67,7 @@ class TemplateTestFBCAlgorithm:
         algo = FastBiasCorrection(subset_size=1, inplace_statistics=False)
 
         algo._backend_entity = self.get_backend()
-        new_bias_shift = algo._reshape_bias_shift(bias_shift, bias_value, channel_axis)
+        new_bias_shift = algo._reshape_bias(bias_shift, bias_value, channel_axis)
         assert list(new_bias_shift.shape) == ref_shape
 
     @staticmethod

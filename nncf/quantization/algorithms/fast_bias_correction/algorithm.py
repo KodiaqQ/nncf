@@ -152,9 +152,9 @@ class FastBiasCorrection(Algorithm):
             in_node_name, out_node_name = self._backend_entity.get_node_names_for_input_output_statistics(node, graph)
 
             input_fp, input_shape = self._get_fp_inputs(statistic_points, in_node_name)
-            output_fp = self._get_fp_outputs(statistic_points, out_node_name)
+            output_fp = self._get_fp_outputs(statistic_points, in_node_name)
 
-            extracted_model = self._extract_submodel(model_transformer, node_name)
+            extracted_model = self._extract_submodel(model_transformer, in_node_name, out_node_name)
 
             sub_input_name, sub_output_name = self._backend_entity.get_sub_input_output_names(extracted_model)
 
@@ -163,7 +163,7 @@ class FastBiasCorrection(Algorithm):
                 # Make index positive
                 channel_axis = range(bias_value.ndim)[channel_axis]
             input_blob = self._backend_entity.create_input_data(input_shape, input_fp, sub_input_name, channel_axis)
-            bias_shift = self._get_bias_shift(
+            updated_bias = self._get_bias(
                 model=extracted_model,
                 input_blob=input_blob,
                 channel_axis=channel_axis,
@@ -171,8 +171,7 @@ class FastBiasCorrection(Algorithm):
                 output_name=sub_output_name,
             )
 
-            bias_shift = self._reshape_bias_shift(bias_shift, bias_value, channel_axis)
-            updated_bias = bias_value + bias_shift
+            updated_bias = self._reshape_bias(updated_bias, bias_value, channel_axis)
             magnitude = self._get_bias_shift_magnitude(bias_value, updated_bias)
 
             if magnitude < self.threshold:
@@ -204,21 +203,21 @@ class FastBiasCorrection(Algorithm):
         return bias_shift_magnitude
 
     @staticmethod
-    def _reshape_bias_shift(bias_shift: Tensor, bias_value: Tensor, channel_axis: int) -> Tensor:
+    def _reshape_bias(bias: Tensor, bias_value: Tensor, channel_axis: int) -> Tensor:
         """
-        Reshape bias_shift tensor in case of dimensions of bias_value is more then 1.
+        Reshape bias tensor in case of dimensions of bias_value is more then 1.
 
-        :param bias_shift: Bias shift tensor.
+        :param bias: Bias shift tensor.
         :param bias_value: Bias value tensor.
         :param channel_axis: Axis to update bias.
 
-        :return TTensor: Updated bias_shift.
+        :return TTensor: Updated bias.
         """
         if bias_value.ndim > 1:
             new_shape = [1] * bias_value.ndim
-            new_shape[channel_axis] = bias_shift.shape[0]
-            bias_shift = bias_shift.reshape(new_shape)
-        return bias_shift
+            new_shape[channel_axis] = bias.shape[0]
+            bias = bias.reshape(new_shape)
+        return bias
 
     def _get_fp_inputs(self, statistic_points: StatisticPointsContainer, node_name: str) -> Tuple[List, List]:
         """
@@ -267,15 +266,20 @@ class FastBiasCorrection(Algorithm):
             output_fp.extend(Tensor(tensor_collector.get_statistics().mean_values))
         return output_fp
 
-    def _extract_submodel(self, model_transformer: ModelTransformer, node_name: str) -> TModel:
+    def _extract_submodel(
+        self, model_transformer: ModelTransformer, input_node_name: str, output_node_name: str
+    ) -> TModel:
         """
         Extracts sub-model using backend-specific ModelTransformer.
 
         :param model_transformer: Backend-specific ModelTransformer.
-        :param node_name: Name of the node that should be a center of the sub-model.
+        :param input_node_name: Name of the input node that should be a center of the sub-model.
+        :param output_node_name: Name of the output node that should be a center of the sub-model.
         :return: Backend-specific sub-model.
         """
-        model_extraction_command = self._backend_entity.model_extraction_command([(node_name, 0)], [(node_name, 0)])
+        model_extraction_command = self._backend_entity.model_extraction_command(
+            [(input_node_name, 0)], [(output_node_name, 0)]
+        )
         me_transformation_layout = TransformationLayout()
         me_transformation_layout.register(model_extraction_command)
         extracted_model = model_transformer.transform(me_transformation_layout)
@@ -296,7 +300,7 @@ class FastBiasCorrection(Algorithm):
             StatisticPoint(target_point=point, tensor_collector=stat_collector, algorithm=self._algorithm_key)
         )
 
-    def _get_bias_shift(
+    def _get_bias(
         self,
         model: TModel,
         input_blob: Union[TTensor, Dict[str, TTensor]],
@@ -319,8 +323,8 @@ class FastBiasCorrection(Algorithm):
         raw_output = engine.infer(input_blob)
         q_outputs = self._backend_entity.process_model_output(raw_output, output_name)
         q_outputs = mean_per_channel(q_outputs, channel_axis)
-        bias_shift = fns.stack(output_fp) - q_outputs
-        return bias_shift
+        bias = fns.stack(output_fp) - q_outputs
+        return bias
 
     def get_statistic_points(self, model: TModel, graph: NNCFGraph) -> StatisticPointsContainer:
         self._set_backend_entity(model)
@@ -331,13 +335,13 @@ class FastBiasCorrection(Algorithm):
         statistic_container = StatisticPointsContainer()
         for node in nodes_with_bias:
             input_port_id, output_port_id = self._backend_entity.get_activation_port_ids_for_bias_node(node)
-            in_node_name, out_node_name = self._backend_entity.get_node_names_for_input_output_statistics(node, graph)
+            in_node_name, _ = self._backend_entity.get_node_names_for_input_output_statistics(node, graph)
 
             pre_layer_statistic_point = self._backend_entity.target_point(
                 TargetType.PRE_LAYER_OPERATION, in_node_name, input_port_id
             )
             post_layer_statistic_point = self._backend_entity.target_point(
-                TargetType.POST_LAYER_OPERATION, out_node_name, output_port_id
+                TargetType.POST_LAYER_OPERATION, in_node_name, output_port_id
             )
             channel_axis = node.metatype.output_channel_axis
 
