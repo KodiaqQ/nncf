@@ -20,12 +20,12 @@ from nncf.common.graph.transformations.commands import TargetType
 from nncf.experimental.common.tensor_statistics.collectors import TensorCollector
 from nncf.experimental.tensor import Tensor
 from nncf.openvino.graph.metatypes.groups import FAKE_QUANTIZE_OPERATIONS
+from nncf.openvino.graph.model_builder import build_for_fast_bc
 from nncf.openvino.graph.node_utils import get_bias_value
 from nncf.openvino.graph.node_utils import get_node_with_bias
 from nncf.openvino.graph.node_utils import is_node_with_bias
 from nncf.openvino.graph.transformations.command_creation import OVCommandCreator
 from nncf.openvino.graph.transformations.commands import OVBiasCorrectionCommand
-from nncf.openvino.graph.transformations.commands import OVModelExtractionCommand
 from nncf.openvino.graph.transformations.commands import OVTargetPoint
 from nncf.openvino.statistics.collectors import get_mean_statistic_collector
 from nncf.quantization.algorithms.fast_bias_correction.backend import FastBiasCorrectionAlgoBackend
@@ -41,12 +41,6 @@ class OVFastBiasCorrectionAlgoBackend(FastBiasCorrectionAlgoBackend):
         node: NNCFNode, bias_value: Tensor, nncf_graph: NNCFGraph
     ) -> OVBiasCorrectionCommand:
         return OVCommandCreator.create_command_to_update_bias(node, bias_value.data, nncf_graph)
-
-    @staticmethod
-    def model_extraction_command(
-        input_ids: List[Tuple[str, int]], output_ids: List[Tuple[str, int]]
-    ) -> OVModelExtractionCommand:
-        return OVModelExtractionCommand(input_ids, output_ids)
 
     @staticmethod
     def mean_statistic_collector(
@@ -103,3 +97,12 @@ class OVFastBiasCorrectionAlgoBackend(FastBiasCorrectionAlgoBackend):
         node_with_bias = get_node_with_bias(node, nncf_graph)
         assert node_with_bias is not None
         return node.node_name, node_with_bias.node_name
+
+    @staticmethod
+    def build_submodel(model: ov.Model, node: NNCFNode) -> ov.Model:
+        const_port_ids = node.layer_attributes.get_const_port_ids()
+        assert len(const_port_ids) == 1
+        act_port_id, out_port_id = OVFastBiasCorrectionAlgoBackend.get_activation_port_ids_for_bias_node(node)
+        return build_for_fast_bc(
+            model, node, act_port_id=act_port_id, weight_port_id=const_port_ids[0], out_port_id=out_port_id
+        )

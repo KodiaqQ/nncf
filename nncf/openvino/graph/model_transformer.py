@@ -15,7 +15,6 @@ from typing import Callable, Dict, List, Tuple
 
 import numpy as np
 import openvino.runtime as ov
-from openvino._pyopenvino import DescriptorTensor
 from openvino.runtime import opset13 as opset
 
 import nncf
@@ -24,6 +23,7 @@ from nncf.common.graph.model_transformer import TModel
 from nncf.common.graph.transformations.commands import TargetType
 from nncf.common.graph.transformations.layout import TransformationLayout
 from nncf.openvino.graph.model_utils import copy_rt_info
+from nncf.openvino.graph.model_utils import update_tensor_name
 from nncf.openvino.graph.node_utils import get_parameter_node_name
 from nncf.openvino.graph.node_utils import get_result_node_name
 from nncf.openvino.graph.transformations.commands import OVBiasCorrectionCommand
@@ -98,19 +98,6 @@ class OVModelTransformer(ModelTransformer):
             for node_output in node.outputs():
                 nodes_queue.extend([i.get_node() for i in node_output.get_target_inputs()])
         return list(activation_nodes)
-
-    @staticmethod
-    def _update_tensor_name(tensors: List[DescriptorTensor], name: str) -> None:
-        """
-        Updates tensors names in-place.
-
-        :param model: List of the tensors.
-        :param name: New name for tensor.
-        """
-        for tensor in tensors:
-            current_names = tensor.get_names()
-            current_names.add(name)
-            tensor.set_names(current_names)
 
     def transform(self, transformation_layout: TransformationLayout) -> ov.Model:
         """
@@ -204,7 +191,7 @@ class OVModelTransformer(ModelTransformer):
             # TODO: (KodiaqQ) check out the models with the Split
             result_name = get_result_node_name(output_name, port_id)
             result = opset.result(output, name=result_name)
-            OVModelTransformer._update_tensor_name([result.get_output_tensor(0)], result_name)
+            update_tensor_name([result.get_output_tensor(0)], result_name)
             extra_model_outputs.append(result)
 
         model_with_outputs = ov.Model(
@@ -573,7 +560,7 @@ class OVModelTransformer(ModelTransformer):
             )
             input_port.replace_source_output(new_param.output(0))
             new_param_tensors = [o.get_tensor() for o in new_param.outputs()]
-            OVModelTransformer._update_tensor_name(new_param_tensors, parameter_name)
+            update_tensor_name(new_param_tensors, parameter_name)
             params.append(new_param)
 
         for output_name, output_port_id in transformation.output_ids:
@@ -582,7 +569,7 @@ class OVModelTransformer(ModelTransformer):
             output_port = output_node.output(output_port_id)
             result_name = get_result_node_name(output_name, output_port_id)
             new_result = opset.result(output_port, name=result_name)
-            OVModelTransformer._update_tensor_name([new_result.get_output_tensor(0)], result_name)
+            update_tensor_name([new_result.get_output_tensor(0)], result_name)
             results.append(new_result)
 
         if not results:

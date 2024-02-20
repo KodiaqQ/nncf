@@ -57,21 +57,6 @@ class FastBiasCorrectionAlgoBackend(ABC):
 
     @staticmethod
     @abstractmethod
-    def model_extraction_command(
-        input_ids: List[Tuple[str, int]], output_ids: List[Tuple[str, int]]
-    ) -> TransformationCommand:
-        """
-        Returns backend-specific command to extract sub-model based on input & output names.
-
-        :param input_ids: List of the input IDs: pairs of node names and correspondent input port ids.
-            Each pair denotes the sub-graph beginning.
-        :param output_ids: List of the output IDs: pairs of node names and correspondent output port ids.
-            Each pair denotes the sub-graph ending.
-        :return: Backend-specific TransformationCommand for the model extraction.
-        """
-
-    @staticmethod
-    @abstractmethod
     def mean_statistic_collector(
         channel_axis: int,
         inplace: bool,
@@ -183,4 +168,15 @@ class FastBiasCorrectionAlgoBackend(ABC):
         :return:
             Name of node to collect input statistics
             Name of node to collect output statistics
+        """
+
+    @staticmethod
+    @abstractmethod
+    def build_submodel(model: TModel, node: NNCFNode) -> TModel:
+        """
+        Build submodel for corrected bias calculation.
+
+        :param model: Backend-specific model instance.
+        :param node: NNCFNode instance of the node with bias.
+        :return: Submodel for the bias calculation.
         """
