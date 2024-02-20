@@ -19,12 +19,12 @@ from nncf.common.graph import NNCFNode
 from nncf.common.graph.transformations.commands import TargetType
 from nncf.experimental.common.tensor_statistics.collectors import TensorCollector
 from nncf.experimental.tensor import Tensor
+from nncf.onnx.graph.model_builder import Builder
 from nncf.onnx.graph.node_utils import get_bias_value
 from nncf.onnx.graph.node_utils import is_any_weight_quantized
 from nncf.onnx.graph.node_utils import is_node_with_bias
 from nncf.onnx.graph.transformations.command_creation import create_bias_correction_command
 from nncf.onnx.graph.transformations.commands import ONNXInitializerUpdateCommand
-from nncf.onnx.graph.transformations.commands import ONNXModelExtractionCommand
 from nncf.onnx.graph.transformations.commands import ONNXTargetPoint
 from nncf.onnx.statistics.collectors import get_mean_statistic_collector
 from nncf.quantization.algorithms.fast_bias_correction.backend import FastBiasCorrectionAlgoBackend
@@ -40,12 +40,6 @@ class ONNXFastBiasCorrectionAlgoBackend(FastBiasCorrectionAlgoBackend):
         node: NNCFNode, bias_value: Tensor, nncf_graph: NNCFGraph
     ) -> ONNXInitializerUpdateCommand:
         return create_bias_correction_command(node, bias_value.data)
-
-    @staticmethod
-    def model_extraction_command(
-        input_ids: List[Tuple[str, int]], output_ids: List[Tuple[str, int]]
-    ) -> ONNXModelExtractionCommand:
-        return ONNXModelExtractionCommand(input_ids, output_ids)
 
     @staticmethod
     def mean_statistic_collector(
@@ -94,3 +88,12 @@ class ONNXFastBiasCorrectionAlgoBackend(FastBiasCorrectionAlgoBackend):
     @staticmethod
     def get_node_names_for_input_output_statistics(node: NNCFNode, nncf_graph: NNCFGraph) -> Tuple[str, str]:
         return node.node_name, node.node_name
+
+    @staticmethod
+    def build_submodel(model: onnx.ModelProto, node: NNCFNode) -> onnx.ModelProto:
+        const_port_ids = list(node.layer_attributes.weight_attrs.keys())
+        assert len(const_port_ids) == 1
+        act_port_id, out_port_id = ONNXFastBiasCorrectionAlgoBackend.get_activation_port_ids_for_bias_node(node)
+        return Builder.build_for_fast_bc(
+            model, node, act_port_id=act_port_id, weight_port_id=const_port_ids[0], out_port_id=out_port_id
+        )

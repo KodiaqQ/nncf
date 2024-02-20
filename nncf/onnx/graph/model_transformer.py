@@ -24,6 +24,7 @@ from nncf.onnx.graph.onnx_helper import get_children
 from nncf.onnx.graph.onnx_helper import get_children_node_mapping
 from nncf.onnx.graph.onnx_helper import get_edge_dtype
 from nncf.onnx.graph.onnx_helper import get_edge_info_mapping
+from nncf.onnx.graph.onnx_helper import get_edge_shape
 from nncf.onnx.graph.onnx_helper import get_name_to_node_map
 from nncf.onnx.graph.onnx_helper import get_node_index
 from nncf.onnx.graph.onnx_helper import get_tensor
@@ -202,8 +203,11 @@ class ONNXModelTransformer(ModelTransformer):
         self._added_target_edges = Counter()
         node_mapping = get_name_to_node_map(model)
         children_node_mapping = get_children_node_mapping(model)
+        edge_info_mapping = get_edge_info_mapping(model)
         for transformation in transformations:
-            model = self._insert_quantizer_dequantizer(model, transformation, node_mapping, children_node_mapping)
+            model = self._insert_quantizer_dequantizer(
+                model, transformation, node_mapping, children_node_mapping, edge_info_mapping
+            )
         return model
 
     def _get_quantize_dequantize_nodes(
@@ -307,6 +311,7 @@ class ONNXModelTransformer(ModelTransformer):
         transformation: ONNXQuantizerInsertionCommand,
         node_mapping: Dict[str, onnx.NodeProto],
         children_node_mapping: Dict[str, List[onnx.ValueInfoProto]],
+        edge_info_mapping: Dict[str, List[onnx.ValueInfoProto]],
     ) -> onnx.ModelProto:
         """
         Inserts QuantizeLinear-DequantizeLinear nodes pair.
@@ -315,9 +320,11 @@ class ONNXModelTransformer(ModelTransformer):
         :param transformation: QuantizeLinear-DequantizeLinear insertion transformation.
         :param node_mapping: Mapping from node name to the node.
         :param children_node_mapping: Mapping from edge name to nodes which consume this edge as an input.
+        :param edge_info_mapping: Mapping from edge name to edge.
         :return: Updated model with inserted QuantizeLinear-DequantizeLinear pair.
         """
         target_edge_name = self._get_quantizer_dequantizer_edge_name(transformation, node_mapping)
+        target_edge = edge_info_mapping[target_edge_name]
         quantizer, dequantizer = self._get_quantize_dequantize_nodes(transformation, target_edge_name)
         onnx_scale_tensor, onnx_zero_point_tensor = ONNXModelTransformer._get_scale_zero_point_tensors(
             transformation, quantizer, dequantizer
@@ -349,8 +356,11 @@ class ONNXModelTransformer(ModelTransformer):
         onnx_zero_point_info = onnx.helper.make_tensor_value_info(
             onnx_zero_point_tensor.name, onnx_zero_point_tensor.data_type, onnx_zero_point_tensor.dims
         )
+        onnx_dequantizer_info = onnx.helper.make_tensor_value_info(
+            dequantizer.output[0], get_edge_dtype(target_edge), get_edge_shape(target_edge)
+        )
         model.graph.initializer.extend([onnx_scale_tensor, onnx_zero_point_tensor])
-        model.graph.value_info.extend([onnx_scale_value_info, onnx_zero_point_info])
+        model.graph.value_info.extend([onnx_scale_value_info, onnx_zero_point_info, onnx_dequantizer_info])
         insert_index = get_node_index(model, input_nodes[0].name)
         model.graph.node.insert(insert_index, quantizer)
         model.graph.node.insert(insert_index + 1, dequantizer)

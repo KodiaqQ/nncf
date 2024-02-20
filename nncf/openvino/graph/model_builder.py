@@ -25,7 +25,7 @@ def build_for_fast_bc(model: ov.Model, node: NNCFNode, act_port_id: int, weight_
     """
     Builds submodel for the FastBiasCorrection algorithm.
 
-    The submodel consists of the biased layer (but without bias), weight quantized and weights:
+    The submodel consists of the biased layer (but without bias), weight fake quantize and weights:
                  Constant
                     |
     Parameter  FakeQuantize
