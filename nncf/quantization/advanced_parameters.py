@@ -17,7 +17,7 @@ from dataclasses import field
 from dataclasses import fields
 from dataclasses import is_dataclass
 from enum import Enum
-from typing import Any, Dict, Optional, Union
+from typing import Any, Dict, Optional, Union, List
 
 import nncf
 from nncf.common.quantization.structs import QuantizationScheme as QuantizationMode
@@ -304,6 +304,8 @@ class AdvancedCompressionParameters:
     :type awq_params: AdvancedAWQParameters
     :param scale_estimation_params: Advanced parameters for scale estimation algorithm.
     :type scale_estimation_params: AdvancedScaleEstimationParameters
+    :param layers_to_correct_after:
+    :type layers_to_correct_after: List
     """
 
     # Advanced AWQ algorithm parameters
@@ -313,6 +315,7 @@ class AdvancedCompressionParameters:
     scale_estimation_params: AdvancedScaleEstimationParameters = field(
         default_factory=AdvancedScaleEstimationParameters
     )
+    layers_to_correct_after: List = []
 
 
 @api()
