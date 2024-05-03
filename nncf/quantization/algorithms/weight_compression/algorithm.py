@@ -296,7 +296,7 @@ class WeightCompression(Algorithm):
         nodes_to_compress = self._get_nodes_to_compress(graph)
 
         activations = {}
-        layers_names_to_correct_after = self._advanced_parameters.layer_to_correct_after
+        layers_names_to_correct_after = self._advanced_parameters.layers_to_correct_after
         layers_to_correct_after = []
         float_block_ends_activations = []
         compressed_block_ends_activations = []
