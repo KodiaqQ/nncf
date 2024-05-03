@@ -315,7 +315,7 @@ class AdvancedCompressionParameters:
     scale_estimation_params: AdvancedScaleEstimationParameters = field(
         default_factory=AdvancedScaleEstimationParameters
     )
-    layers_to_correct_after: List = []
+    layers_to_correct_after: List = field(default_factory=list)
 
 
 @api()
