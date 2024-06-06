@@ -296,31 +296,27 @@ class WeightCompression(Algorithm):
         nodes_to_compress = self._get_nodes_to_compress(graph)
 
         activations = {}
-        layers_names_to_correct_after = self._advanced_parameters.layers_to_correct_after
-        layers_to_correct_after = []
-        float_block_ends_activations = []
-        compressed_block_ends_activations = []
-        for layer_name in layers_names_to_correct_after:
-            layers_to_correct_after.append(graph.get_node_by_name(layer_name))
+        names_to_correct = self._advanced_parameters.layers_to_correct
+        layers_to_correct = []
+        floats_for_correction = []
+        for layer_name in names_to_correct:
+            layers_to_correct.append(graph.get_node_by_name(layer_name))
 
         if dataset is not None and self._sensitivity_metric != SensitivityMetric.WEIGHT_QUANTIZATION_ERROR:
             activations = self._get_activations(dataset, self._subset_size, nodes_to_compress, graph, model)
 
-        if dataset is not None and layers_to_correct_after:
-            float_block_ends_activations = self._get_block_ends_activations(
-                dataset, layers_to_correct_after, graph, model
+        if dataset is not None and layers_to_correct:
+            floats_for_correction = self._get_additional_activations(
+                dataset, layers_to_correct, graph, model
             )
 
         transformed_model = self.do_compression(model, graph, nodes_to_compress, activations)
-        if dataset is not None and layers_to_correct_after:
-            compressed_block_ends_activations = self._get_block_ends_activations(
-                dataset, layers_to_correct_after, graph, transformed_model
-            )
 
-        if float_block_ends_activations and compressed_block_ends_activations:
+        if floats_for_correction:
             transformed_model = self.do_correction(
-                transformed_model, float_block_ends_activations, compressed_block_ends_activations
+                transformed_model, graph, dataset, floats_for_correction, self._advanced_parameters.fast_correction
             )
+            del floats_for_correction
 
         return transformed_model
 
@@ -432,10 +428,19 @@ class WeightCompression(Algorithm):
         )
         return transformed_model
 
-    def do_correction(self, model, float_acts, compressed_acts):
-        shifts = {}
-        for layer_name, float_values in track(float_acts.items(), description="Applying Block Correction"):
-            compressed_values = compressed_acts[layer_name]
+    def do_correction(self, model, graph, dataset, float_acts, fast_correction = True):
+        if fast_correction:
+            nodes = [graph.get_node_by_name(name) for name in float_acts.keys()]
+            compressed_acts = self._get_additional_activations(dataset, nodes, graph, model)
+
+        for node_name, float_values in float_acts.items():
+            nncf_logger.info(f"Correction of activation after {node_name} node")
+
+            if not fast_correction:
+                node = graph.get_node_by_name(node_name)
+                compressed_acts = self._get_additional_activations(dataset, [node], graph, model)
+
+            compressed_values = compressed_acts[node_name]
             layer_hiddens = []
             for idx, float_value in enumerate(float_values):
                 layer_hiddens.append(float_value.data[-1, :])
@@ -457,10 +462,11 @@ class WeightCompression(Algorithm):
             if positive_smaller_mean > positive_larger_mean:
                 direction *= -1
 
-            shifts[layer_name] = np.expand_dims(direction, axis=(0, 1))
+            shift = np.expand_dims(direction, axis=(0, 1))
 
-        transformed_model = self._backend_entity.insert_shifts(model, shifts)
-        return transformed_model
+            model = self._backend_entity.insert_shifts(model, {node_name: shift})
+        del compressed_acts
+        return model
 
     def get_statistic_points(self, model: TModel, graph: NNCFGraph) -> StatisticPointsContainer:
         pass
@@ -568,13 +574,13 @@ class WeightCompression(Algorithm):
 
         return activations
 
-    def _get_block_ends_activations(
-        self, dataset: Dataset, block_ends: List[NNCFNode], graph: NNCFGraph, model: TModel
+    def _get_additional_activations(
+        self, dataset: Dataset, nodes: List[NNCFNode], graph: NNCFGraph, model: TModel
     ) -> Dict[str, List[Tensor]]:
         activations = {}
         statistic_container = StatisticPointsContainer()
 
-        for node in block_ends:
+        for node in nodes:
             statistic_point = self._backend_entity.target_point(
                 TargetType.POST_LAYER_OPERATION, node.node_name, port_id=0
             )
@@ -589,9 +595,9 @@ class WeightCompression(Algorithm):
         statistics_aggregator.register_statistic_points(statistic_container)
         statistics_aggregator.collect_statistics(model, graph)
 
-        for node in block_ends:
+        for node in nodes:
             x_fp = self._get_fp_inputs(statistic_container, node_name=node.node_name, port_id=0)
-            x_fp = [i.squeeze() for i in x_fp]
+            x_fp = [i.squeeze(axis=0) for i in x_fp]
             activations[node.node_name] = x_fp
 
         return activations

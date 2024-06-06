@@ -212,12 +212,12 @@ class OVWeightCompressionAlgoBackend(WeightCompressionAlgoBackend):
 
     def insert_shifts(self, model, shifts):
         node_mapping = OVModelTransformer._get_name_to_node_mapping(model)
-        for layer_name, shift in shifts.items():
-            node = node_mapping[layer_name]
+        for node_name, shift in shifts.items():
+            node = node_mapping[node_name]
             node_output = node.output(0)
             target_inputs = node_output.get_target_inputs()
-            shift_const = opset.constant(shift, name=f"{layer_name}/nncf_shift_const")
-            shift_node = opset.add(node_output, shift_const, name=f"{layer_name}/nncf_shift")
+            shift_const = opset.constant(shift, name=f"{node_name}/nncf_shift_const")
+            shift_node = opset.add(node_output, shift_const, name=f"{node_name}/nncf_shift")
 
             for target_input in target_inputs:
                 target_input.replace_source_output(shift_node.output(0))
