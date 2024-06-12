@@ -9,58 +9,74 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import datetime
+import json
+import sys
 from functools import partial
 from pathlib import Path
 
 import openvino as ov
 from datasets import load_dataset
 from optimum.intel import OVModelForCausalLM
-from transformers import AutoTokenizer
 from transformers import AutoConfig
+from transformers import AutoTokenizer
 
 import nncf
-import sys
-from examples.llm_compression.openvino.layers_correction.helpers import get_nncf_dataset
-from examples.llm_compression.openvino.layers_correction.helpers import compress_model
 from examples.llm_compression.openvino.layers_correction.helpers import custom_transform_func
 from examples.llm_compression.openvino.layers_correction.helpers import evaluate
-
-DATA_NAME = "text"
-TASK = "wikitext"
-DATASET_NAME = "wikitext-2-raw-v1"
-SPLIT = "train[:1000]"
-LIMIT = 100
+from examples.llm_compression.openvino.layers_correction.helpers import get_nncf_dataset
+from nncf.common.logging.logger import nncf_logger
+from nncf.common.logging.logger import set_log_file
+from nncf.quantization.advanced_parameters import AdvancedCompressionParameters
 
 
-def main(float_model_path, output_path, layers_to_correct = None, fast_correction = True):
-    ov_config = {"PERFORMANCE_HINT": "LATENCY", "NUM_STREAMS": "1", "CACHE_DIR": ""}
-    config = AutoConfig.from_pretrained(float_model_path, trust_remote_code=True)
-    model = OVModelForCausalLM.from_pretrained(
-        float_model_path,
-        trust_remote_code=True,
-        use_cache=True,
-        ov_config=ov_config,
-        load_in_8bit=False,
-        config=config
-    )
-    tokenizer = AutoTokenizer.from_pretrained(float_model_path, trust_remote_code=True)
-    dataset = load_dataset(TASK, DATASET_NAME, split=SPLIT)
-    dataset = dataset.filter(lambda example: len(example[DATA_NAME]) > 128)
-    transform_func = partial(custom_transform_func, tokenizer=tokenizer, ov_model=model.model, config=config, data_name=DATA_NAME)
-    nncf_dataset = get_nncf_dataset(dataset, transform_func)
-
-    optimized_model = compress_model(
-        ov_model=model.model,
-        nncf_dataset=nncf_dataset,
-        mode=nncf.CompressWeightsMode.INT4_SYM,
-        ratio=None,
-        group_size=128,
-        awq=False,
-        layers_to_correct=layers_to_correct if layers_to_correct else [],
-        fast_correction=fast_correction,
-    )
+def main(float_model_path, output_path, experiment_config):
     optimized_path = Path(output_path)
     optimized_path.mkdir(exist_ok=True)
+    experiment_name = experiment_config["name"]
+    nncf_logger.info(f"Started experiment: {experiment_name}")
+
+    dump_path = optimized_path.joinpath("experiment_config.json")
+    log_path = optimized_path.joinpath("experiment_log.txt")
+    set_log_file(log_path)
+    with open(dump_path.as_posix(), "w") as f:
+        json.dump(experiment_config, f, sort_keys=True, indent=4)
+        nncf_logger.info(f"Saved experiment configuration to {dump_path.as_posix()}")
+
+    ov_config = {"PERFORMANCE_HINT": "LATENCY", "NUM_STREAMS": "1", "CACHE_DIR": ""}
+    data_config = experiment_config["data"]
+    config = AutoConfig.from_pretrained(float_model_path, trust_remote_code=True)
+    model = OVModelForCausalLM.from_pretrained(
+        float_model_path, trust_remote_code=True, use_cache=True, ov_config=ov_config, load_in_8bit=False, config=config
+    )
+    tokenizer = AutoTokenizer.from_pretrained(float_model_path, trust_remote_code=True)
+    dataset = load_dataset(data_config["task"], data_config["dataset_name"], split=data_config["split"])
+    dataset = dataset.filter(lambda example: len(example[data_config["data_name"]]) > 128)
+    transform_func = partial(
+        custom_transform_func,
+        tokenizer=tokenizer,
+        ov_model=model.model,
+        config=config,
+        data_name=data_config["data_name"],
+    )
+    nncf_dataset = get_nncf_dataset(dataset, transform_func)
+
+    optimized_model = nncf.compress_weights(
+        model.model,
+        dataset=nncf_dataset,
+        mode=nncf.CompressWeightsMode.INT4_SYM,
+        ratio=1.0,
+        group_size=128,
+        subset_size=experiment_config["subset_size"],
+        awq=False,
+        sensitivity_metric=nncf.parameters.SensitivityMetric.MAX_ACTIVATION_VARIANCE,
+        advanced_parameters=AdvancedCompressionParameters(
+            layers_to_correct=experiment_config["layers_to_correct"],
+            fast_correction=experiment_config["fast_correction"],
+            correction_type=experiment_config["correction_type"],
+        ),
+    )
+
     model.config.save_pretrained(optimized_path.as_posix())
     tokenizer.save_pretrained(optimized_path.as_posix())
     output_model_path = optimized_path.joinpath("openvino_model.xml")
@@ -69,91 +85,121 @@ def main(float_model_path, output_path, layers_to_correct = None, fast_correctio
     del model
     del optimized_model
 
-    evaluate(optimized_path.as_posix(), optimized_path.as_posix(), TASK, LIMIT)
+    evaluate(optimized_path.as_posix(), optimized_path.as_posix(), data_config["task"], data_config["val_limit"])
+
 
 if __name__ == "__main__":
     input_dir = sys.argv[1]
     configurations = [
         {
-            "name": "post_attention_layernorm_add_fast",
+            "name": "Input MLP blocks, rmsnorm",
             "fast_correction": True,
-            "layers": [
-                "__module.model.layers.0.post_attention_layernorm/aten::layer_norm/Add",
-                "__module.model.layers.1.post_attention_layernorm/aten::layer_norm/Add",
-                "__module.model.layers.2.post_attention_layernorm/aten::layer_norm/Add",
-                "__module.model.layers.3.post_attention_layernorm/aten::layer_norm/Add",
-                "__module.model.layers.4.post_attention_layernorm/aten::layer_norm/Add",
-                "__module.model.layers.5.post_attention_layernorm/aten::layer_norm/Add",
-                "__module.model.layers.6.post_attention_layernorm/aten::layer_norm/Add",
-                "__module.model.layers.7.post_attention_layernorm/aten::layer_norm/Add",
-                "__module.model.layers.8.post_attention_layernorm/aten::layer_norm/Add",
-                "__module.model.layers.9.post_attention_layernorm/aten::layer_norm/Add",
-                "__module.model.layers.10.post_attention_layernorm/aten::layer_norm/Add",
-                "__module.model.layers.11.post_attention_layernorm/aten::layer_norm/Add",
-                "__module.model.layers.12.post_attention_layernorm/aten::layer_norm/Add",
-                "__module.model.layers.13.post_attention_layernorm/aten::layer_norm/Add",
-                "__module.model.layers.14.post_attention_layernorm/aten::layer_norm/Add",
-                "__module.model.layers.15.post_attention_layernorm/aten::layer_norm/Add",
-                "__module.model.layers.16.post_attention_layernorm/aten::layer_norm/Add",
-                "__module.model.layers.17.post_attention_layernorm/aten::layer_norm/Add",
-                "__module.model.layers.18.post_attention_layernorm/aten::layer_norm/Add",
-                "__module.model.layers.19.post_attention_layernorm/aten::layer_norm/Add",
-                "__module.model.layers.20.post_attention_layernorm/aten::layer_norm/Add",
-                "__module.model.layers.21.post_attention_layernorm/aten::layer_norm/Add",
-                "__module.model.layers.22.post_attention_layernorm/aten::layer_norm/Add",
-                "__module.model.layers.23.post_attention_layernorm/aten::layer_norm/Add",
-                "__module.model.layers.24.post_attention_layernorm/aten::layer_norm/Add",
-                "__module.model.layers.25.post_attention_layernorm/aten::layer_norm/Add",
-                "__module.model.layers.26.post_attention_layernorm/aten::layer_norm/Add",
-                "__module.model.layers.27.post_attention_layernorm/aten::layer_norm/Add",
-                "__module.model.layers.28.post_attention_layernorm/aten::layer_norm/Add",
-                "__module.model.layers.29.post_attention_layernorm/aten::layer_norm/Add",
-                "__module.model.layers.30.post_attention_layernorm/aten::layer_norm/Add",
-                "__module.model.layers.31.post_attention_layernorm/aten::layer_norm/Add",
+            "correction_type": "rmsnorm",
+            "subset_size": 500,
+            "ignore_skip_connection": False,
+            "data": {
+                "task": "gsm8k",
+                "dataset_name": "main",
+                "data_name": "question",
+                "split": "train",
+                "val_limit": 500,
+            },
+            "layers_to_correct": [
+                "__module.model.layers.\d+.post_attention_layernorm/aten::layer_norm/Add",
             ],
         },
         {
-            "name": "post_attention_layernorm_add_slow",
-            "fast_correction": False,
-            "layers": [
-                "__module.model.layers.0.post_attention_layernorm/aten::layer_norm/Add",
-                "__module.model.layers.1.post_attention_layernorm/aten::layer_norm/Add",
-                "__module.model.layers.2.post_attention_layernorm/aten::layer_norm/Add",
-                "__module.model.layers.3.post_attention_layernorm/aten::layer_norm/Add",
-                "__module.model.layers.4.post_attention_layernorm/aten::layer_norm/Add",
-                "__module.model.layers.5.post_attention_layernorm/aten::layer_norm/Add",
-                "__module.model.layers.6.post_attention_layernorm/aten::layer_norm/Add",
-                "__module.model.layers.7.post_attention_layernorm/aten::layer_norm/Add",
-                "__module.model.layers.8.post_attention_layernorm/aten::layer_norm/Add",
-                "__module.model.layers.9.post_attention_layernorm/aten::layer_norm/Add",
-                "__module.model.layers.10.post_attention_layernorm/aten::layer_norm/Add",
-                "__module.model.layers.11.post_attention_layernorm/aten::layer_norm/Add",
-                "__module.model.layers.12.post_attention_layernorm/aten::layer_norm/Add",
-                "__module.model.layers.13.post_attention_layernorm/aten::layer_norm/Add",
-                "__module.model.layers.14.post_attention_layernorm/aten::layer_norm/Add",
-                "__module.model.layers.15.post_attention_layernorm/aten::layer_norm/Add",
-                "__module.model.layers.16.post_attention_layernorm/aten::layer_norm/Add",
-                "__module.model.layers.17.post_attention_layernorm/aten::layer_norm/Add",
-                "__module.model.layers.18.post_attention_layernorm/aten::layer_norm/Add",
-                "__module.model.layers.19.post_attention_layernorm/aten::layer_norm/Add",
-                "__module.model.layers.20.post_attention_layernorm/aten::layer_norm/Add",
-                "__module.model.layers.21.post_attention_layernorm/aten::layer_norm/Add",
-                "__module.model.layers.22.post_attention_layernorm/aten::layer_norm/Add",
-                "__module.model.layers.23.post_attention_layernorm/aten::layer_norm/Add",
-                "__module.model.layers.24.post_attention_layernorm/aten::layer_norm/Add",
-                "__module.model.layers.25.post_attention_layernorm/aten::layer_norm/Add",
-                "__module.model.layers.26.post_attention_layernorm/aten::layer_norm/Add",
-                "__module.model.layers.27.post_attention_layernorm/aten::layer_norm/Add",
-                "__module.model.layers.28.post_attention_layernorm/aten::layer_norm/Add",
-                "__module.model.layers.29.post_attention_layernorm/aten::layer_norm/Add",
-                "__module.model.layers.30.post_attention_layernorm/aten::layer_norm/Add",
-                "__module.model.layers.31.post_attention_layernorm/aten::layer_norm/Add",
+            "name": "Input MLP blocks, pca",
+            "fast_correction": True,
+            "correction_type": "pca",
+            "subset_size": 500,
+            "ignore_skip_connection": False,
+            "data": {
+                "task": "gsm8k",
+                "dataset_name": "main",
+                "data_name": "question",
+                "split": "train",
+                "val_limit": 500,
+            },
+            "layers_to_correct": [
+                "__module.model.layers.\d+.post_attention_layernorm/aten::layer_norm/Add",
+            ],
+        },
+        {
+            "name": "Input MLP blocks, lstsq",
+            "fast_correction": True,
+            "correction_type": "lstsq",
+            "subset_size": 500,
+            "ignore_skip_connection": False,
+            "data": {
+                "task": "gsm8k",
+                "dataset_name": "main",
+                "data_name": "question",
+                "split": "train",
+                "val_limit": 500,
+            },
+            "layers_to_correct": [
+                "__module.model.layers.\d+.post_attention_layernorm/aten::layer_norm/Add",
+            ],
+        },
+        {
+            "name": "Output MLP blocks, rmsnorm",
+            "fast_correction": True,
+            "correction_type": "rmsnorm",
+            "subset_size": 500,
+            "ignore_skip_connection": False,
+            "data": {
+                "task": "gsm8k",
+                "dataset_name": "main",
+                "data_name": "question",
+                "split": "train",
+                "val_limit": 500,
+            },
+            "layers_to_correct": [
+                "__module.model.layers.\d+.mlp.down_proj/aten::linear/MatMul",
+            ],
+        },
+        {
+            "name": "Output MLP blocks, pca",
+            "fast_correction": True,
+            "correction_type": "pca",
+            "subset_size": 500,
+            "ignore_skip_connection": False,
+            "data": {
+                "task": "gsm8k",
+                "dataset_name": "main",
+                "data_name": "question",
+                "split": "train",
+                "val_limit": 500,
+            },
+            "layers_to_correct": [
+                "__module.model.layers.\d+.mlp.down_proj/aten::linear/MatMul",
+            ],
+        },
+        {
+            "name": "Output MLP blocks, lstsq",
+            "fast_correction": True,
+            "correction_type": "lstsq",
+            "subset_size": 500,
+            "ignore_skip_connection": False,
+            "data": {
+                "task": "gsm8k",
+                "dataset_name": "main",
+                "data_name": "question",
+                "split": "train",
+                "val_limit": 500,
+            },
+            "layers_to_correct": [
+                "__module.model.layers.\d+.mlp.down_proj/aten::linear/MatMul",
             ],
         },
     ]
     for configuration in configurations:
-        output_dir = Path(input_dir).parent.joinpath(str(LIMIT), configuration["name"]).as_posix()
+        timestamp = datetime.datetime.now().strftime("%d_%m_%Y-%H_%M_%S")
+        output_dir = Path(input_dir).parent.joinpath(f"run_{timestamp}")
+        output_dir.mkdir(exist_ok=True)
+        output_dir = output_dir.as_posix()
         try:
-            main(input_dir, output_dir, configuration["layers"], configuration["fast_correction"])
+            main(input_dir, output_dir, configuration)
         except Exception as e:
             print(e)

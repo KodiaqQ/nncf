@@ -9,48 +9,17 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from typing import Callable, Iterable, Optional, TypeVar, List
+import subprocess
+import sys
+from typing import Callable, Iterable, Optional, TypeVar
 
 import numpy as np
 import openvino as ov
 
 import nncf
-from nncf.parameters import CompressWeightsMode
-from nncf.quantization.advanced_parameters import AdvancedCompressionParameters
-import subprocess
-import sys
 
 DataItem = TypeVar("DataItem")
 ModelInput = TypeVar("ModelInput")
-
-def compress_model(
-    ov_model: ov.Model, nncf_dataset: nncf.Dataset, mode: CompressWeightsMode, ratio: float, group_size: int, awq: bool, layers_to_correct: List[str], fast_correction: bool = True
-) -> ov.Model:
-    """
-    Compress the given OpenVINO model using NNCF weight compression.
-
-    :param ov_model: The original OpenVINO model to be compressed.
-    :param nncf_dataset: A representative dataset for the weight compression algorithm.
-    :param ratio: The ratio between baseline and backup precisions
-    :param group_size: Number of weights (e.g. 128) in the channel dimension
-        that share quantization parameters (scale).
-    :param awq: Indicates whether use AWQ weights correction.
-    :return: The OpenVINO model with compressed weights.
-    """
-    optimized_ov_model = nncf.compress_weights(
-        ov_model,
-        dataset=nncf_dataset,
-        mode=mode,
-        ratio=ratio,
-        group_size=group_size,
-        awq=awq,
-        sensitivity_metric=nncf.parameters.SensitivityMetric.MAX_ACTIVATION_VARIANCE,
-        advanced_parameters=AdvancedCompressionParameters(
-            layers_to_correct=layers_to_correct,
-            fast_correction=fast_correction
-        )
-    )
-    return optimized_ov_model
 
 
 def get_nncf_dataset(
@@ -103,7 +72,7 @@ def custom_transform_func(item, tokenizer, ov_model, config, data_name):
             res[key_name] = ov.Tensor(shape=shape, type=input_dtypes[key_name])
             res[val_name] = ov.Tensor(shape=shape, type=input_dtypes[val_name])
         return res
-    
+
     state_inputs_len = len(input_names - res.keys()) // 2
     state_input_shape = ov_model.inputs[-1].partial_shape.get_min_shape()
     num_heads = state_input_shape[1]
@@ -117,10 +86,10 @@ def evaluate(experiment_path, model_path, task, limit):
     cmd_line = f"{sys.executable} -m lm_eval"
     cmd_line += f" --model_args pretrained={model_path},convert_tokenizer=true,trust_remote_code=true"
     cmd_line += f" --output_path {experiment_path}"
-    cmd_line += f" --device cpu"
+    cmd_line += " --device cpu"
     cmd_line += f" --task {task}"
-    cmd_line += f" --model openvino"
-    cmd_line += f" --batch_size 1"
+    cmd_line += " --model openvino"
+    cmd_line += " --batch_size 1"
     cmd_line += f" --limit {limit}"
     print(f"Running command: {cmd_line}")
-    subprocess.run(cmd_line, check=True, shell=True, stdout = subprocess.DEVNULL)
+    subprocess.run(cmd_line, check=True, shell=True, stdout=subprocess.DEVNULL)

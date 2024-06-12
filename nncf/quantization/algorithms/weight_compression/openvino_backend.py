@@ -27,7 +27,9 @@ from nncf.openvino.graph.node_utils import get_const_value
 from nncf.openvino.graph.node_utils import get_weight_channel_axes
 from nncf.openvino.graph.transformations.commands import OVTargetPoint
 from nncf.openvino.rt_info import dump_parameters
+from nncf.openvino.statistics.collectors import get_mean_stat_collector
 from nncf.openvino.statistics.collectors import get_raw_stat_collector
+from nncf.openvino.statistics.collectors import get_slice_stat_collector
 from nncf.parameters import CompressWeightsMode
 from nncf.quantization.algorithms.weight_compression.awq_patterns import get_awq_patterns
 from nncf.quantization.algorithms.weight_compression.backend import WeightCompressionAlgoBackend
@@ -77,6 +79,16 @@ class OVWeightCompressionAlgoBackend(WeightCompressionAlgoBackend):
     @staticmethod
     def raw_statistic_collector(num_samples: Optional[int] = None) -> TensorCollector:
         return get_raw_stat_collector(num_samples)
+
+    @staticmethod
+    def mean_stat_collector(channel_axis, num_samples: Optional[int] = None) -> TensorCollector:
+        return get_mean_stat_collector(num_samples, channel_axis, inplace=False)
+
+    @staticmethod
+    def slice_stat_collector(num_samples: Optional[int] = None) -> TensorCollector:
+        return get_slice_stat_collector(
+            reduction_axes=1, start=-2, stop=-1, step=1, inplace=True, num_samples=num_samples
+        )
 
     @staticmethod
     def get_activation_port_id(node: NNCFNode, nncf_graph: NNCFGraph) -> int:
@@ -210,18 +222,25 @@ class OVWeightCompressionAlgoBackend(WeightCompressionAlgoBackend):
 
         return model
 
-    def insert_shifts(self, model, shifts):
+    def insert_layers(self, model, data, layer_type: str = "shift", skip_add: bool = True):
         node_mapping = OVModelTransformer._get_name_to_node_mapping(model)
-        for node_name, shift in shifts.items():
+        for node_name, value in data.items():
             node = node_mapping[node_name]
             node_output = node.output(0)
             target_inputs = node_output.get_target_inputs()
-            shift_const = opset.constant(shift, name=f"{node_name}/nncf_shift_const", dtype=ov.Type.f16)
-            shift_convert = opset.convert(shift_const, ov.Type.f32, name=f"{node_name}/nncf_shift_convert")
-            shift_node = opset.add(node_output, shift_convert, name=f"{node_name}/nncf_shift")
+            value_const = opset.constant(value, name=f"{node_name}/nncf_{layer_type}_const", dtype=ov.Type.f16)
+            value_convert = opset.convert(value_const, ov.Type.f32, name=f"{node_name}/nncf_{layer_type}_convert")
+            if layer_type == "shift":
+                value_node = opset.add(node_output, value_convert, name=f"{node_name}/nncf_{layer_type}")
+            elif layer_type == "scale":
+                value_node = opset.multiply(node_output, value_convert, name=f"{node_name}/nncf_{layer_type}")
 
             for target_input in target_inputs:
-                target_input.replace_source_output(shift_node.output(0))
+                target_node = target_input.get_node()
+                target_type = target_node.get_type_name()
+                if skip_add and target_type == "Add":
+                    continue
+                target_input.replace_source_output(value_node.output(0))
         return model
 
     @staticmethod

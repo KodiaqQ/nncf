@@ -30,12 +30,14 @@ from nncf.experimental.common.tensor_statistics.collectors import NoopReducer
 from nncf.experimental.common.tensor_statistics.collectors import QuantileReducer
 from nncf.experimental.common.tensor_statistics.collectors import RawReducer
 from nncf.experimental.common.tensor_statistics.collectors import ShapeAggregator
+from nncf.experimental.common.tensor_statistics.collectors import SliceReducer
 from nncf.experimental.common.tensor_statistics.collectors import TensorCollector
 from nncf.openvino.graph.node_utils import get_inplace_batch_mean_op
 from nncf.openvino.graph.node_utils import get_inplace_max_op
 from nncf.openvino.graph.node_utils import get_inplace_mean_op
 from nncf.openvino.graph.node_utils import get_inplace_mean_per_ch
 from nncf.openvino.graph.node_utils import get_inplace_min_op
+from nncf.openvino.graph.node_utils import get_inplace_slice_op
 from nncf.openvino.statistics.statistics import OVMeanTensorStatistic
 from nncf.openvino.statistics.statistics import OVRawTensorStatistic
 from nncf.openvino.tensor import OVNNCFTensor
@@ -197,6 +199,14 @@ class OVMinReducer(MinReducer):
         return get_inplace_min_op(self._reduction_axes)
 
 
+class OVSliceReducer(SliceReducer):
+    def _get_processor(self):
+        return OVNNCFCollectorTensorProcessor
+
+    def get_inplace_fn(self):
+        return get_inplace_slice_op(self._reduction_axes, self._start, self._stop, self._step)
+
+
 class OVMaxReducer(MaxReducer):
     def _get_processor(self):
         return OVNNCFCollectorTensorProcessor
@@ -286,8 +296,31 @@ def get_mean_statistic_collector(
     return collector
 
 
+def get_mean_stat_collector(num_samples: int, channel_axis: int, inplace: bool = True) -> TensorCollector:
+    if channel_axis == 0:
+        reducer = OVBatchMeanReducer(inplace)
+    else:
+        reducer = OVMeanPerChanelReducer(channel_axis=channel_axis, inplace=inplace)
+    aggregator = NoopAggregator(num_samples)
+
+    collector = TensorCollector(OVRawTensorStatistic)
+    collector.register_statistic_branch(OVRawTensorStatistic.VALUES_STATS, reducer, aggregator)
+    return collector
+
+
 def get_raw_stat_collector(num_samples: Optional[int] = None) -> TensorCollector:
     reducer = RawReducer()
+    aggregator = NoopAggregator(num_samples)
+
+    collector = TensorCollector(OVRawTensorStatistic)
+    collector.register_statistic_branch(OVRawTensorStatistic.VALUES_STATS, reducer, aggregator)
+    return collector
+
+
+def get_slice_stat_collector(
+    reduction_axes, start, stop, step, inplace, num_samples: Optional[int] = None
+) -> TensorCollector:
+    reducer = OVSliceReducer(reduction_axes, start, stop, step, inplace)
     aggregator = NoopAggregator(num_samples)
 
     collector = TensorCollector(OVRawTensorStatistic)

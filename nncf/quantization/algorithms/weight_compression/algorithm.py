@@ -9,14 +9,15 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import re
 from collections import defaultdict
 from typing import Dict, List, Optional, OrderedDict, Tuple, TypeVar
 
 import numpy as np
+from sklearn.decomposition import PCA
 
 import nncf
 from nncf import Dataset
-from nncf.common.factory import NNCFGraphFactory
 from nncf.common.factory import StatisticsAggregatorFactory
 from nncf.common.graph.graph import NNCFGraph
 from nncf.common.graph.graph import NNCFNode
@@ -42,7 +43,6 @@ from nncf.quantization.algorithms.weight_compression.scale_estimation import Sca
 from nncf.quantization.algorithms.weight_compression.weight_lowering import WeightCompressionConfig
 from nncf.scopes import IgnoredScope
 from nncf.scopes import get_ignored_node_names_from_ignored_scope
-from sklearn.decomposition import PCA
 
 TModel = TypeVar("TModel")
 TTensor = TypeVar("TTensor")
@@ -298,17 +298,18 @@ class WeightCompression(Algorithm):
         activations = {}
         names_to_correct = self._advanced_parameters.layers_to_correct
         layers_to_correct = []
+        all_nodes_by_name = {node.node_name: node for node in graph.get_all_nodes()}
         floats_for_correction = []
         for layer_name in names_to_correct:
-            layers_to_correct.append(graph.get_node_by_name(layer_name))
+            pattern = re.compile(f"^{layer_name}$")
+            matches = list(filter(pattern.match, all_nodes_by_name.keys()))
+            layers_to_correct.extend([all_nodes_by_name[m] for m in matches])
 
-        if dataset is not None and self._sensitivity_metric != SensitivityMetric.WEIGHT_QUANTIZATION_ERROR:
-            activations = self._get_activations(dataset, self._subset_size, nodes_to_compress, graph, model)
+        # if dataset is not None and self._sensitivity_metric != SensitivityMetric.WEIGHT_QUANTIZATION_ERROR:
+        # activations = self._get_activations(dataset, self._subset_size, nodes_to_compress, graph, model)
 
         if dataset is not None and layers_to_correct:
-            floats_for_correction = self._get_additional_activations(
-                dataset, layers_to_correct, graph, model
-            )
+            floats_for_correction = self._get_additional_activations(dataset, layers_to_correct, graph, model)
 
         transformed_model = self.do_compression(model, graph, nodes_to_compress, activations)
 
@@ -428,10 +429,12 @@ class WeightCompression(Algorithm):
         )
         return transformed_model
 
-    def do_correction(self, model, graph, dataset, float_acts, fast_correction = True):
+    def do_correction(self, model, graph, dataset, float_acts, fast_correction=True):
         if fast_correction:
-            nodes = [graph.get_node_by_name(name) for name in float_acts.keys()]
+            nodes = [graph.get_node_by_name(name) for name in float_acts]
             compressed_acts = self._get_additional_activations(dataset, nodes, graph, model)
+        correction_type = self._advanced_parameters.correction_type
+        ignore_skip_connection = self._advanced_parameters.ignore_skip_connection
 
         for node_name, float_values in float_acts.items():
             nncf_logger.info(f"Correction of activation after {node_name} node")
@@ -441,31 +444,72 @@ class WeightCompression(Algorithm):
                 compressed_acts = self._get_additional_activations(dataset, [node], graph, model)
 
             compressed_values = compressed_acts[node_name]
-            layer_hiddens = []
-            for idx, float_value in enumerate(float_values):
-                layer_hiddens.append(float_value.data[-1, :])
-                layer_hiddens.append(compressed_values[idx].data[-1, :])
-            layer_hiddens = np.array(layer_hiddens)
-            relative_layer_hiddens = (layer_hiddens[::2] - layer_hiddens[1::2]) # [n, channels]
 
-            train_hiddens = np.vstack(
-                relative_layer_hiddens - relative_layer_hiddens.mean(axis=0, keepdims=True)
-            ) # [n, channels]
+            if correction_type == "pca":
+                layer_hiddens = []
+                for idx, float_value in enumerate(float_values):
+                    layer_hiddens.append(float_value.data)
+                    layer_hiddens.append(compressed_values[idx].data)
+                layer_hiddens = np.array(layer_hiddens)
+                relative_layer_hiddens = layer_hiddens[::2] - layer_hiddens[1::2]  # [n, channels]
 
-            pca_model = PCA(n_components=1, whiten=False).fit(train_hiddens)
-            direction = pca_model.components_.astype(np.float32).squeeze(axis=0) # [channel]
+                train_hiddens = np.vstack(
+                    relative_layer_hiddens - relative_layer_hiddens.mean(axis=0, keepdims=True)
+                )  # [n, channels]
 
-            projected_hiddens = (layer_hiddens @ direction) / np.linalg.norm(direction) # [n]
-            positive_smaller_mean = np.mean([projected_hiddens[i] < projected_hiddens[i + 1] for i in range(0, len(float_values) * 2, 2)])
-            positive_larger_mean = np.mean([projected_hiddens[i] > projected_hiddens[i + 1]for i in range(0, len(float_values) * 2, 2)])
+                pca_model = PCA(n_components=1, whiten=False).fit(train_hiddens)
+                direction = pca_model.components_.astype(np.float32).squeeze(axis=0)  # [channel]
 
-            if positive_smaller_mean > positive_larger_mean:
-                direction *= -1
+                projected_hiddens = (layer_hiddens @ direction) / np.linalg.norm(direction)  # [n]
+                positive_smaller_mean = np.mean(
+                    [projected_hiddens[i] < projected_hiddens[i + 1] for i in range(0, len(float_values) * 2, 2)]
+                )
+                positive_larger_mean = np.mean(
+                    [projected_hiddens[i] > projected_hiddens[i + 1] for i in range(0, len(float_values) * 2, 2)]
+                )
 
-            shift = np.expand_dims(direction, axis=(0, 1))
+                if positive_smaller_mean > positive_larger_mean:
+                    direction *= -1
 
-            model = self._backend_entity.insert_shifts(model, {node_name: shift})
-        del compressed_acts
+                shift = np.expand_dims(direction, axis=(0, 1))
+                model = self._backend_entity.insert_layers(
+                    model, {node_name: shift}, layer_type="shift", skip_add=ignore_skip_connection
+                )
+            elif correction_type == "lstsq":
+                c_values = np.stack([c.data for c in compressed_values], axis=0)
+                f_values = np.stack([f.data for f in float_values], axis=0)
+                shift = []
+
+                for ch_id in range(c_values.shape[1]):
+                    A = c_values[:, ch_id]
+                    ones = np.ones_like(A)
+                    A = np.stack((A, ones), axis=1)
+                    B = f_values[:, ch_id]
+                    solution = np.linalg.lstsq(A, B)
+                    channel_shift = solution[0][1]
+                    shift.append(channel_shift)
+                shift = np.expand_dims(shift, axis=(0, 1))
+                model = self._backend_entity.insert_layers(
+                    model, {node_name: shift}, layer_type="shift", skip_add=ignore_skip_connection
+                )
+            elif correction_type == "rmsnorm":
+                layer_scale = None
+                for f_value, c_value in zip(float_values, compressed_values):
+                    f_variance = np.power(f_value.data, 2).mean(axis=0, keepdims=True)
+                    c_variance = np.power(c_value.data, 2).mean(axis=0, keepdims=True)
+                    token_scale = (1 / np.sqrt(f_variance + 1e-5)) / (1 / np.sqrt(c_variance + 1e-5))
+                    scale = token_scale.mean(0)
+                    if layer_scale is None:
+                        layer_scale = scale
+                    else:
+                        layer_scale += scale
+                layer_scale = layer_scale / len(float_values)
+                layer_scale = np.expand_dims(layer_scale, axis=(0, 1))
+                model = self._backend_entity.insert_layers(
+                    model, {node_name: layer_scale}, layer_type="scale", skip_add=ignore_skip_connection
+                )
+
+        compressed_acts = {}
         return model
 
     def get_statistic_points(self, model: TModel, graph: NNCFGraph) -> StatisticPointsContainer:
@@ -579,12 +623,20 @@ class WeightCompression(Algorithm):
     ) -> Dict[str, List[Tensor]]:
         activations = {}
         statistic_container = StatisticPointsContainer()
+        correction_type = self._advanced_parameters.correction_type
 
         for node in nodes:
             statistic_point = self._backend_entity.target_point(
                 TargetType.POST_LAYER_OPERATION, node.node_name, port_id=0
             )
-            stat_collector = self._backend_entity.raw_statistic_collector()
+            if correction_type == "pca":
+                stat_collector = self._backend_entity.slice_stat_collector(num_samples=self._subset_size)
+            elif correction_type == "lstsq":
+                stat_collector = self._backend_entity.mean_stat_collector(
+                    channel_axis=-1, num_samples=self._subset_size
+                )
+            elif correction_type == "rmsnorm":
+                stat_collector = self._backend_entity.raw_statistic_collector(num_samples=self._subset_size)
             statistic_container.add_statistic_point(
                 StatisticPoint(
                     target_point=statistic_point, tensor_collector=stat_collector, algorithm=self._algorithm_key
@@ -597,7 +649,7 @@ class WeightCompression(Algorithm):
 
         for node in nodes:
             x_fp = self._get_fp_inputs(statistic_container, node_name=node.node_name, port_id=0)
-            x_fp = [i.squeeze(axis=0) for i in x_fp]
+            x_fp = [i.squeeze() for i in x_fp]
             activations[node.node_name] = x_fp
 
         return activations

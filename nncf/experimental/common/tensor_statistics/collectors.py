@@ -489,6 +489,30 @@ class RawReducer(NoopReducer):
         return self._reduce_out_of_place(x)
 
 
+class SliceReducer(TensorReducerBase):
+    def __init__(
+        self,
+        reduction_axes: Optional[ReductionAxes] = None,
+        start: Optional[int] = 1,
+        stop: Optional[int] = -1,
+        step: Optional[int] = 1,
+        inplace: bool = False,
+    ):
+        super().__init__(reduction_axes, inplace)
+        self._start = start
+        self._stop = stop
+        self._step = step
+
+    def __eq__(self, __o: object) -> bool:
+        return super().__eq__(__o) and self._start == __o._start and self._stop == __o._stop and self._step == __o._step
+
+    def __hash__(self) -> int:
+        return hash((self.__class__.__name__, self._inplace, self._reduction_axes, self._start, self._stop, self._step))
+
+    def _reduce_out_of_place(self, x: List[NNCFTensor]) -> List[NNCFTensor]:
+        pass
+
+
 class MinReducer(TensorReducerBase):
     def _reduce_out_of_place(self, x: List[NNCFTensor]) -> List[NNCFTensor]:
         x = x[0]

@@ -239,6 +239,20 @@ def get_inplace_reduce_op(
     return get_reduce_op
 
 
+def get_slice_op(reduction_axes, start, stop, step) -> InplaceInsertionFnType:
+    def get_slice(node: ov.Node, output_port_id: int, output_node_name: str) -> ov.Node:
+        return opset.slice(
+            node.output(output_port_id),
+            start=[start],
+            stop=[stop],
+            step=[step],
+            axes=[reduction_axes],
+            name=output_node_name,
+        )
+
+    return get_slice
+
+
 def get_inplace_min_op(reduction_axes: Optional[ReductionAxes]) -> InplaceInsertionFnType:
     """
     Returns inplace min function that adds reduce min node to a passed node.
@@ -248,6 +262,10 @@ def get_inplace_min_op(reduction_axes: Optional[ReductionAxes]) -> InplaceInsert
     :returns: Inplace insertion function to use in ModelTransformer.
     """
     return get_inplace_reduce_op(opset.reduce_min, reduction_axes, False)
+
+
+def get_inplace_slice_op(reduction_axes: Optional[ReductionAxes], start=0, stop=-1, step=1) -> InplaceInsertionFnType:
+    return get_slice_op(reduction_axes, start, stop, step)
 
 
 def get_inplace_max_op(reduction_axes: Optional[ReductionAxes], use_abs_max: bool) -> InplaceInsertionFnType:

@@ -17,7 +17,7 @@ from dataclasses import field
 from dataclasses import fields
 from dataclasses import is_dataclass
 from enum import Enum
-from typing import Any, Dict, Optional, Union, List
+from typing import Any, Dict, List, Optional, Union
 
 import nncf
 from nncf.common.quantization.structs import QuantizationScheme as QuantizationMode
@@ -317,6 +317,8 @@ class AdvancedCompressionParameters:
     )
     layers_to_correct: List = field(default_factory=list)
     fast_correction: bool = True
+    correction_type: str = "pca"  # pca, lstsq
+    ignore_skip_connection: bool = False
 
 
 @api()
