@@ -31,18 +31,6 @@ from nncf.quantization.advanced_parameters import AdvancedCompressionParameters
 
 
 def main(float_model_path, output_path, experiment_config):
-    optimized_path = Path(output_path)
-    optimized_path.mkdir(exist_ok=True)
-    experiment_name = experiment_config["name"]
-    nncf_logger.info(f"Started experiment: {experiment_name}")
-
-    dump_path = optimized_path.joinpath("experiment_config.json")
-    log_path = optimized_path.joinpath("experiment_log.txt")
-    set_log_file(log_path)
-    with open(dump_path.as_posix(), "w") as f:
-        json.dump(experiment_config, f, sort_keys=True, indent=4)
-        nncf_logger.info(f"Saved experiment configuration to {dump_path.as_posix()}")
-
     ov_config = {"PERFORMANCE_HINT": "LATENCY", "NUM_STREAMS": "1", "CACHE_DIR": ""}
     data_config = experiment_config["data"]
     config = AutoConfig.from_pretrained(float_model_path, trust_remote_code=True)
@@ -74,120 +62,53 @@ def main(float_model_path, output_path, experiment_config):
             layers_to_correct=experiment_config["layers_to_correct"],
             fast_correction=experiment_config["fast_correction"],
             correction_type=experiment_config["correction_type"],
+            ignore_skip_connection=experiment_config["ignore_skip_connection"],
         ),
     )
 
-    model.config.save_pretrained(optimized_path.as_posix())
-    tokenizer.save_pretrained(optimized_path.as_posix())
-    output_model_path = optimized_path.joinpath("openvino_model.xml")
+    model.config.save_pretrained(output_path.as_posix())
+    tokenizer.save_pretrained(output_path.as_posix())
+    output_model_path = output_path.joinpath("openvino_model.xml")
     ov.save_model(optimized_model, output_model_path.as_posix())
 
     del model
     del optimized_model
 
-    evaluate(optimized_path.as_posix(), optimized_path.as_posix(), data_config["task"], data_config["val_limit"])
+    evaluate(output_path.as_posix(), output_path.as_posix(), data_config["task"], data_config["val_limit"])
 
 
 if __name__ == "__main__":
     input_dir = sys.argv[1]
     configurations = [
         {
-            "name": "Input MLP blocks, rmsnorm",
-            "fast_correction": True,
-            "correction_type": "rmsnorm",
-            "subset_size": 500,
-            "ignore_skip_connection": False,
-            "data": {
-                "task": "gsm8k",
-                "dataset_name": "main",
-                "data_name": "question",
-                "split": "train",
-                "val_limit": 500,
-            },
-            "layers_to_correct": [
-                "__module.model.layers.\d+.post_attention_layernorm/aten::layer_norm/Add",
-            ],
-        },
-        {
             "name": "Input MLP blocks, pca",
             "fast_correction": True,
             "correction_type": "pca",
-            "subset_size": 500,
+            "subset_size": 1000,
             "ignore_skip_connection": False,
             "data": {
                 "task": "gsm8k",
                 "dataset_name": "main",
                 "data_name": "question",
                 "split": "train",
-                "val_limit": 500,
+                "val_limit": 100,
             },
             "layers_to_correct": [
                 "__module.model.layers.\d+.post_attention_layernorm/aten::layer_norm/Add",
-            ],
-        },
-        {
-            "name": "Input MLP blocks, lstsq",
-            "fast_correction": True,
-            "correction_type": "lstsq",
-            "subset_size": 500,
-            "ignore_skip_connection": False,
-            "data": {
-                "task": "gsm8k",
-                "dataset_name": "main",
-                "data_name": "question",
-                "split": "train",
-                "val_limit": 500,
-            },
-            "layers_to_correct": [
-                "__module.model.layers.\d+.post_attention_layernorm/aten::layer_norm/Add",
-            ],
-        },
-        {
-            "name": "Output MLP blocks, rmsnorm",
-            "fast_correction": True,
-            "correction_type": "rmsnorm",
-            "subset_size": 500,
-            "ignore_skip_connection": False,
-            "data": {
-                "task": "gsm8k",
-                "dataset_name": "main",
-                "data_name": "question",
-                "split": "train",
-                "val_limit": 500,
-            },
-            "layers_to_correct": [
-                "__module.model.layers.\d+.mlp.down_proj/aten::linear/MatMul",
             ],
         },
         {
             "name": "Output MLP blocks, pca",
             "fast_correction": True,
             "correction_type": "pca",
-            "subset_size": 500,
+            "subset_size": 1000,
             "ignore_skip_connection": False,
             "data": {
                 "task": "gsm8k",
                 "dataset_name": "main",
                 "data_name": "question",
                 "split": "train",
-                "val_limit": 500,
-            },
-            "layers_to_correct": [
-                "__module.model.layers.\d+.mlp.down_proj/aten::linear/MatMul",
-            ],
-        },
-        {
-            "name": "Output MLP blocks, lstsq",
-            "fast_correction": True,
-            "correction_type": "lstsq",
-            "subset_size": 500,
-            "ignore_skip_connection": False,
-            "data": {
-                "task": "gsm8k",
-                "dataset_name": "main",
-                "data_name": "question",
-                "split": "train",
-                "val_limit": 500,
+                "val_limit": 100,
             },
             "layers_to_correct": [
                 "__module.model.layers.\d+.mlp.down_proj/aten::linear/MatMul",
@@ -198,7 +119,17 @@ if __name__ == "__main__":
         timestamp = datetime.datetime.now().strftime("%d_%m_%Y-%H_%M_%S")
         output_dir = Path(input_dir).parent.joinpath(f"run_{timestamp}")
         output_dir.mkdir(exist_ok=True)
-        output_dir = output_dir.as_posix()
+
+        experiment_name = configuration["name"]
+        nncf_logger.info(f"Started experiment: {experiment_name}")
+
+        dump_path = output_dir.joinpath("experiment_config.json")
+        log_path = output_dir.joinpath("experiment_log.txt")
+        set_log_file(log_path)
+        with open(dump_path.as_posix(), "w") as f:
+            json.dump(configuration, f, sort_keys=True, indent=4)
+            nncf_logger.info(f"Saved experiment configuration to {dump_path.as_posix()}")
+
         try:
             main(input_dir, output_dir, configuration)
         except Exception as e:
