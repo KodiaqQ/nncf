@@ -40,6 +40,17 @@ def main(float_model_path, output_path, experiment_config):
     tokenizer = AutoTokenizer.from_pretrained(float_model_path, trust_remote_code=True)
     dataset = load_dataset(data_config["task"], data_config["dataset_name"], split=data_config["split"])
     dataset = dataset.filter(lambda example: len(example[data_config["data_name"]]) > 128)
+
+    custom_dataset = []
+    for item_id, data_item in enumerate(dataset):
+        if item_id > experiment_config["subset_size"]:
+            break
+        text = data_item["text"]
+        tokens = tokenizer.tokenize(text)
+        for i in range(1, len(tokens) - 5):
+            modified_text = tokenizer.convert_tokens_to_string(tokens[:i])
+            custom_dataset.append({"modified": modified_text})
+
     transform_func = partial(
         custom_transform_func,
         tokenizer=tokenizer,
@@ -47,7 +58,7 @@ def main(float_model_path, output_path, experiment_config):
         config=config,
         data_name=data_config["data_name"],
     )
-    nncf_dataset = get_nncf_dataset(dataset, transform_func)
+    nncf_dataset = get_nncf_dataset(custom_dataset, transform_func)
 
     optimized_model = nncf.compress_weights(
         model.model,
@@ -55,7 +66,7 @@ def main(float_model_path, output_path, experiment_config):
         mode=nncf.CompressWeightsMode.INT4_SYM,
         ratio=1.0,
         group_size=128,
-        subset_size=experiment_config["subset_size"],
+        subset_size=len(custom_dataset),
         awq=False,
         sensitivity_metric=nncf.parameters.SensitivityMetric.MAX_ACTIVATION_VARIANCE,
         advanced_parameters=AdvancedCompressionParameters(
@@ -81,20 +92,20 @@ if __name__ == "__main__":
     input_dir = sys.argv[1]
     configurations = [
         {
-            "name": "Input MLP blocks, pca",
+            "name": "End of model block, extended with [INST], each word, test data, pca",
             "fast_correction": True,
             "correction_type": "pca",
-            "subset_size": 1000,
+            "subset_size": 100,
             "ignore_skip_connection": False,
             "data": {
-                "task": "gsm8k",
-                "dataset_name": "main",
-                "data_name": "question",
-                "split": "train",
+                "task": "wikitext",
+                "dataset_name": "wikitext-2-v1",
+                "data_name": "modified",
+                "split": "test",
                 "val_limit": 100,
             },
             "layers_to_correct": [
-                "__module.model.layers.\d+.post_attention_layernorm/aten::layer_norm/Add",
+                "__module.model.layers.\d+/aten::add/Add_1",
             ],
         },
         {
