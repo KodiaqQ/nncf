@@ -508,7 +508,17 @@ class WeightCompression(Algorithm):
                 model = self._backend_entity.insert_layers(
                     model, {node_name: layer_scale}, layer_type="scale", skip_add=ignore_skip_connection
                 )
+            elif correction_type == "mean":
+                c_values = np.stack([c.data for c in compressed_values], axis=0)
+                f_values = np.stack([f.data for f in float_values], axis=0)
+                f_values = np.mean(f_values, axis=0)
+                c_values = np.mean(c_values, axis=0)
 
+                shift = f_values - c_values
+                shift = np.expand_dims(shift, axis=(0, 1))
+                model = self._backend_entity.insert_layers(
+                    model, {node_name: shift}, layer_type="shift", skip_add=ignore_skip_connection
+                )
         compressed_acts = {}
         return model
 
@@ -631,7 +641,7 @@ class WeightCompression(Algorithm):
             )
             if correction_type == "pca":
                 stat_collector = self._backend_entity.slice_stat_collector(num_samples=self._subset_size)
-            elif correction_type == "lstsq":
+            elif correction_type in ["lstsq", "mean"]:
                 stat_collector = self._backend_entity.mean_stat_collector(
                     channel_axis=-1, num_samples=self._subset_size
                 )

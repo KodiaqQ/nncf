@@ -39,16 +39,17 @@ def main(float_model_path, output_path, experiment_config):
     )
     tokenizer = AutoTokenizer.from_pretrained(float_model_path, trust_remote_code=True)
     dataset = load_dataset(data_config["task"], data_config["dataset_name"], split=data_config["split"])
-    dataset = dataset.filter(lambda example: len(example[data_config["data_name"]]) > 128)
+    dataset = dataset.filter(lambda example: len(example["text"]) > 128)
 
     custom_dataset = []
     for item_id, data_item in enumerate(dataset):
         if item_id > experiment_config["subset_size"]:
             break
         text = data_item["text"]
-        tokens = tokenizer.tokenize(text)
-        for i in range(1, len(tokens) - 5):
-            modified_text = tokenizer.convert_tokens_to_string(tokens[:i])
+        split_text = text.split(" ")
+        modified_text = f"{split_text[0]}"
+        for word in split_text[1:-5]:
+            modified_text += f" {word}"
             custom_dataset.append({"modified": modified_text})
 
     transform_func = partial(
@@ -92,7 +93,7 @@ if __name__ == "__main__":
     input_dir = sys.argv[1]
     configurations = [
         {
-            "name": "End of model block, extended with [INST], each word, test data, pca",
+            "name": "End of model block, extended, each word, test data, pca",
             "fast_correction": True,
             "correction_type": "pca",
             "subset_size": 100,
@@ -108,23 +109,57 @@ if __name__ == "__main__":
                 "__module.model.layers.\d+/aten::add/Add_1",
             ],
         },
-        {
-            "name": "Output MLP blocks, pca",
-            "fast_correction": True,
-            "correction_type": "pca",
-            "subset_size": 1000,
-            "ignore_skip_connection": False,
-            "data": {
-                "task": "gsm8k",
-                "dataset_name": "main",
-                "data_name": "question",
-                "split": "train",
-                "val_limit": 100,
-            },
-            "layers_to_correct": [
-                "__module.model.layers.\d+.mlp.down_proj/aten::linear/MatMul",
-            ],
-        },
+        # {
+        #     "name": "End of model block, extended, each word, test data, lstsq",
+        #     "fast_correction": True,
+        #     "correction_type": "lstsq",
+        #     "subset_size": 100,
+        #     "ignore_skip_connection": False,
+        #     "data": {
+        #         "task": "wikitext",
+        #         "dataset_name": "wikitext-2-v1",
+        #         "data_name": "modified",
+        #         "split": "test",
+        #         "val_limit": 100,
+        #     },
+        #     "layers_to_correct": [
+        #         "__module.model.layers.\d+/aten::add/Add_1",
+        #     ],
+        # },
+        # {
+        #     "name": "End of model block, extended, each word, test data, rmsnorm",
+        #     "fast_correction": True,
+        #     "correction_type": "rmsnorm",
+        #     "subset_size": 100,
+        #     "ignore_skip_connection": False,
+        #     "data": {
+        #         "task": "wikitext",
+        #         "dataset_name": "wikitext-2-v1",
+        #         "data_name": "modified",
+        #         "split": "test",
+        #         "val_limit": 100,
+        #     },
+        #     "layers_to_correct": [
+        #         "__module.model.layers.\d+/aten::add/Add_1",
+        #     ],
+        # },
+        # {
+        #     "name": "End of the model, extended, each word, test data, pca",
+        #     "fast_correction": True,
+        #     "correction_type": "pca",
+        #     "subset_size": 1000,
+        #     "ignore_skip_connection": False,
+        #     "data": {
+        #         "task": "wikitext",
+        #         "dataset_name": "wikitext-2-v1",
+        #         "data_name": "modified",
+        #         "split": "test",
+        #         "val_limit": 100,
+        #     },
+        #     "layers_to_correct": [
+        #         "__module.model.norm/aten::layer_norm/Add",
+        #     ],
+        # },
     ]
     for configuration in configurations:
         timestamp = datetime.datetime.now().strftime("%d_%m_%Y-%H_%M_%S")
