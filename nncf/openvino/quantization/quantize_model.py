@@ -43,6 +43,7 @@ from nncf.quantization.algorithms.accuracy_control.algorithm import Quantization
 from nncf.quantization.algorithms.accuracy_control.algorithm import calculate_accuracy_drop
 from nncf.quantization.algorithms.accuracy_control.evaluator import Evaluator
 from nncf.quantization.algorithms.post_training.algorithm import PostTrainingQuantization
+from nncf.quantization.algorithms.smooth_quant_tuner.algorithm import SmoothQuantTuner
 from nncf.quantization.algorithms.weight_compression.algorithm import WeightCompression
 from nncf.quantization.quantize_model import BATCHWISE_STATISTICS_WARNING
 from nncf.quantization.quantize_model import is_model_no_batchwise_support
@@ -156,16 +157,28 @@ def native_quantize_impl(
     """
     Implementation of the `quantize()` method for the OpenVINO backend via the OpenVINO Runtime API.
     """
-    quantization_algorithm = PostTrainingQuantization(
-        mode=mode,
-        preset=preset,
-        target_device=target_device,
-        subset_size=subset_size,
-        fast_bias_correction=fast_bias_correction,
-        model_type=model_type,
-        ignored_scope=ignored_scope,
-        advanced_parameters=advanced_parameters,
-    )
+    if advanced_parameters.smooth_quant_alphas.tune_alpha:
+        quantization_algorithm = SmoothQuantTuner(
+            mode=mode,
+            preset=preset,
+            target_device=target_device,
+            subset_size=subset_size,
+            fast_bias_correction=fast_bias_correction,
+            model_type=model_type,
+            ignored_scope=ignored_scope,
+            advanced_parameters=advanced_parameters,
+        )
+    else:
+        quantization_algorithm = PostTrainingQuantization(
+            mode=mode,
+            preset=preset,
+            target_device=target_device,
+            subset_size=subset_size,
+            fast_bias_correction=fast_bias_correction,
+            model_type=model_type,
+            ignored_scope=ignored_scope,
+            advanced_parameters=advanced_parameters,
+        )
     graph = GraphConverter.create_nncf_graph(model)
     warning_model_no_batchwise_support(graph, advanced_parameters, model_type, OPERATIONS_OUTPUT_HAS_NO_BATCH_AXIS)
     quantized_model = quantization_algorithm.apply(model, graph, dataset=calibration_dataset)

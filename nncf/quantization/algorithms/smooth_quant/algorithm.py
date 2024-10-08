@@ -67,6 +67,7 @@ class SmoothQuant(Algorithm):
         self._algorithm_key = f"SQ_{hash(self)}"
         self._cached_multiply_names = Counter()
         self._alpha_map = alpha_map
+        self._alpha_map_by_layers = None
 
     @property
     def available_backends(self) -> List[BackendType]:
@@ -138,7 +139,10 @@ class SmoothQuant(Algorithm):
                 weight_statistics = self._process_weight_statistics(node_to_smooth, weight_value)
                 weight_statistics = self._clip_statistics([weight_statistics])
 
-                alpha = alpha_map[node_to_smooth.metatype]
+                if self._alpha_map_by_layers is not None:
+                    alpha = self._alpha_map_by_layers[node_to_smooth.node_name]
+                else:
+                    alpha = alpha_map[node_to_smooth.metatype]
 
                 scales, ratio = self._calculate_scale_and_ratio(activations_value, weight_statistics, alpha)
 

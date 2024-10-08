@@ -157,6 +157,7 @@ class AdvancedSmoothQuantParameters:
 
     convolution: float = -1
     matmul: float = 0.95
+    tune_alpha: bool = True
 
 
 class RestoreMode(Enum):
