@@ -35,7 +35,7 @@ from nncf.tensor import functions as fns
 TModel = TypeVar("TModel")
 TTensor = TypeVar("TTensor")
 STATISTIC_BRANCH_KEY = "abs_max"
-ALPHA_MAP = {"convolution": 0.05, "matmul": 0.95}
+ALPHA_MAP = {"matmul": 0.95}
 
 
 class SmoothQuant(Algorithm):
@@ -416,7 +416,7 @@ class SmoothQuant(Algorithm):
         """
         alpha_by_metatype_map = {}
         name_to_metatype = {
-            "convolution": self._backend_entity.convolution_metatypes,
+            # "convolution": self._backend_entity.convolution_metatypes,
             "matmul": self._backend_entity.matmul_metatypes,
         }
         for type_name, alpha_value in self._alpha_map.items():

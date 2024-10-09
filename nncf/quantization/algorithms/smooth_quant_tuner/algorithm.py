@@ -44,7 +44,7 @@ from nncf.tensor import functions as fns
 TModel = TypeVar("TModel")
 TPass = Callable[[TModel], TModel]
 
-SCALES_GRID = list(np.arange(0, 1.01, 0.05))
+SCALES_GRID = list(np.arange(0, 1.01, 0.1))
 
 
 class SmoothQuantTuner(Algorithm):
