@@ -211,7 +211,7 @@ class SmoothQuantTuner(Algorithm):
                     )[0]
 
                     for fp_stat, int_stat in zip(fp_statistics, int_statistics):
-                        current_loss += fns.sum(fns.abs(fp_stat - int_stat) ** 2)
+                        current_loss += fns.sum(fns.abs(fp_stat - int_stat))
 
                 if current_loss < group_losses[group_id]:
                     group_losses[group_id] = current_loss

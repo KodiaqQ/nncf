@@ -118,7 +118,7 @@ class SmoothQuant(Algorithm):
             best_ratio = 0.0
             empty_statistic = False
             for node_to_smooth in nodes:
-                source_node, input_port_id, source_output_port_id, _ = group_id
+                source_node, input_port_id, source_output_port_id, _, _ = group_id
                 activations_value = self._get_statistics_for_node(
                     statistic_points, node_to_smooth.node_name, input_port_id
                 )
@@ -222,7 +222,7 @@ class SmoothQuant(Algorithm):
             edge = nncf_graph.get_edge(source_node, node_to_smooth)
             # Such group_id (with node, ports, and shape as a hash) allows us to be confident
             # that all sensitive parameters are equal for successor nodes are equal.
-            group_id = (source_node, input_act_port, edge.output_port_id, hash(str(edge.tensor_shape)))
+            group_id = (source_node, input_act_port, edge.output_port_id, hash(str(edge.tensor_shape)), node_to_smooth)
             groups[group_id].append(node_to_smooth)
 
         return groups
