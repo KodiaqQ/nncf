@@ -129,10 +129,8 @@ if STRIP_MODE != StripMode.NONE:
         from nncf.torch.strip_tuned_lora_model import strip_tuned_lora_model
         model = strip_tuned_lora_model(model)
         if STRIP_MODE == StripMode.TO_OV:
-            if not (OV_DIR / 'openvino_model.bin').exists():
-                # TODO: without it export fails with cuda:0 vs cpu on embedding
-                model = model.cpu()
-                export_from_model(model, OV_DIR, stateful=False, compression_option="bf16")
+            model = model.cpu()
+            export_from_model(model, OV_DIR, stateful=False)
             model = OVModelForCausalLM.from_pretrained(
                 model_id=OV_DIR,
                 trust_remote_code=True,

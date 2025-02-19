@@ -958,8 +958,8 @@ class FQLoRA_asym(torch.autograd.Function):
         # torch.cuda.nvtx.range_push("forward_torch")
         original_shape = W.shape
 
-        input_low = input_low_.type(torch.bfloat16)
-        input_range = input_range_.type(torch.bfloat16)
+        input_low = input_low_.to(W.dtype)
+        input_range = input_range_.to(W.dtype)
 
         input_ = W + B @ A
         # print('X weight:' ,torch.linalg.norm(input_).item())
@@ -1016,8 +1016,8 @@ class FQLoRA_sym(torch.autograd.Function):
 
         original_shape = W.shape
 
-        input_low = input_low.type(torch.bfloat16)
-        input_range = input_range.type(torch.bfloat16)
+        input_low = input_low.to(W.dtype)
+        input_range = input_range.to(W.dtype)
 
         input_ = W + B @ A
         input_ = input_.reshape(group_shape)  # NOTE: careful with what you reshape here!

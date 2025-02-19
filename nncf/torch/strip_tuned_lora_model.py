@@ -45,6 +45,9 @@ def strip_tuned_lora_model(model: NNCFNetwork) -> NNCFNetwork:
             if w is None or not isinstance(w, torch.nn.Parameter):
                 raise nncf.InternalError(f"Could not find a torch.nn.Parameter in the model by name {weight_name}.")
 
+            input_low = input_low.to(w.dtype)
+            input_range = input_range.to(w.dtype)
+
             input_ = w + quantizer_module._lora_B @ quantizer_module._lora_A
             input_ = input_.reshape(quantizer_module._qspec.weight_shape)
             scale = (quantizer_module.levels - 1) / input_range
