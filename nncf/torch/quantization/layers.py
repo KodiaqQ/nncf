@@ -957,11 +957,13 @@ class FQLoRA_asym(torch.autograd.Function):
     def forward(ctx, W, group_shape, A, B, input_low_, input_range_, level_low, level_high, levels):
         # torch.cuda.nvtx.range_push("forward_torch")
         original_shape = W.shape
+        original_dtype = W.dtype
 
-        input_low = input_low_.to(W.dtype)
-        input_range = input_range_.to(W.dtype)
+        input_low = input_low_.to(original_dtype)
+        input_range = input_range_.to(original_dtype)
 
         input_ = W + B @ A
+        input_ = input_.to(original_dtype)
         # print('X weight:' ,torch.linalg.norm(input_).item())
         # print('IL:' ,torch.linalg.norm(input_low).item())
         # print('IR:' ,torch.linalg.norm(input_range).item())
@@ -1015,11 +1017,13 @@ class FQLoRA_sym(torch.autograd.Function):
             input_range = scale - input_low
 
         original_shape = W.shape
+        original_dtype = W.dtype
 
-        input_low = input_low.to(W.dtype)
-        input_range = input_range.to(W.dtype)
+        input_low = input_low.to(original_dtype)
+        input_range = input_range.to(original_dtype)
 
         input_ = W + B @ A
+        input_ = input_.to(original_dtype)
         input_ = input_.reshape(group_shape)  # NOTE: careful with what you reshape here!
 
         output = common_forward(input_, input_low, input_range, levels)
