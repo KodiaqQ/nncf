@@ -32,9 +32,9 @@ class StripMode(Enum):
     TO_DECOMPRESS = "to_decompress"
     TO_OV = "to_ov"
 
-MODE = nncf.CompressWeightsMode.INT4_ASYM
-BACKUP_MODE = nncf.BackupMode.INT8_ASYM
-TORCH_DTYPE = torch.bfloat16
+MODE = nncf.CompressWeightsMode.INT4_SYM
+BACKUP_MODE = nncf.BackupMode.INT8_SYM
+TORCH_DTYPE = torch.float32
 
 MODEL_ID = 'deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B'
 GROUP_SIZE = 32
@@ -165,7 +165,7 @@ def main(strip_mode, eval = True, use_cuda = True):
 
 if __name__ == "__main__":
     results = {}
-    for strip_mode in [StripMode.NONE, StripMode.TO_FLOAT, StripMode.TO_DECOMPRESS, StripMode.TO_OV]:
+    for strip_mode in [StripMode.TO_FLOAT, StripMode.TO_DECOMPRESS]:
         similarity = main(strip_mode, eval=True, use_cuda=True)
         results[strip_mode] = similarity
     

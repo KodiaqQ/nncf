@@ -1,3 +1,4 @@
+import torch.random
 import torch
 from torch import nn
 import nncf
@@ -19,10 +20,10 @@ def set_seed(seed):
 
 set_seed(0)
 
-MAIN_DIM = 4
-LAST_DIM = 2
-MAIN_WEIGHT = torch.rand(LAST_DIM, MAIN_DIM)
+MAIN_DIM = 16
+LAST_DIM = 8
 
+MAIN_WEIGHT = torch.rand(LAST_DIM, MAIN_DIM) - 0.5
 
 class TestModel(nn.Module):
     INPUT_SIZE = [1, MAIN_DIM]
@@ -38,12 +39,12 @@ class TestModel(nn.Module):
 @pytest.mark.parametrize(
     ("mode", "torch_dtype"),
     (
-        # (nncf.CompressWeightsMode.INT4_ASYM, torch.float32),
-        # (nncf.CompressWeightsMode.INT4_ASYM, torch.float16),
-        # (nncf.CompressWeightsMode.INT4_ASYM, torch.bfloat16),
+        (nncf.CompressWeightsMode.INT4_ASYM, torch.float32),
+        (nncf.CompressWeightsMode.INT4_ASYM, torch.float16),
+        (nncf.CompressWeightsMode.INT4_ASYM, torch.bfloat16),
         (nncf.CompressWeightsMode.INT4_SYM, torch.float32),
-        # (nncf.CompressWeightsMode.INT4_SYM, torch.float16),
-        # (nncf.CompressWeightsMode.INT4_SYM, torch.bfloat16),
+        (nncf.CompressWeightsMode.INT4_SYM, torch.float16),
+        (nncf.CompressWeightsMode.INT4_SYM, torch.bfloat16),
     )
 )
 def test_lora_quantize(mode, torch_dtype):
@@ -57,7 +58,7 @@ def test_lora_quantize(mode, torch_dtype):
         compressed_model = nncf.compress_weights(
             model,
             ratio=1,
-            group_size=4,
+            group_size=8,
             mode=mode,
             backup_mode=None,
             dataset=nncf.Dataset(dataset),

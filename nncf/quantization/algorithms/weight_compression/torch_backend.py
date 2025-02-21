@@ -320,7 +320,7 @@ class PTWeightCompressionAlgoBackend(WeightCompressionAlgoBackend):
             quantizer.signed = bool(torch.any(input_low.data < 0))
             quantizer.set_levels()
             ll_lh = quantizer.level_low / quantizer.level_high
-            if signed_scale and quantizer.level_low != 0:
+            if signed_scale:
                 w_abs_min = torch.abs(input_low)
                 w_max = input_high
                 scale = torch.where(w_abs_min >= w_max, w_abs_min, -w_max)

@@ -52,34 +52,31 @@ def strip_tuned_lora_model(model: NNCFNetwork) -> NNCFNetwork:
 
             input_ = w + quantizer_module._lora_B @ quantizer_module._lora_A
             input_ = input_.reshape(quantizer_module._qspec.weight_shape)
-            scale = (quantizer_module.levels - 1) / input_range
-            output = input_.clip(min=input_low, max=input_low + input_range)
-            output -= input_low
-            output *= scale
+            input_ = input_.to(w.dtype)
 
-            # breakpoint()
-            zero_point = (-input_low * scale).round()
-            output_dtype = output.dtype
-            output -= zero_point
+            scale = input_range / (quantizer_module.levels - 1)
+            scale = torch.where(torch.abs(scale) < quantizer_module.eps, quantizer_module.eps, scale)
+            zero_point = quantizer_module.level_low - (input_low / scale)
+            zero_point = zero_point.round()
+            zero_point = zero_point.clip(min=quantizer_module.level_low, max=quantizer_module.level_high)
+
+            output = input_ / scale
+            output = output + zero_point
             output = output.round()
-            output = output.to(torch.int8) + zero_point.to(torch.int8)
-            output = output.to(output_dtype)
-
-            original_shape = w.shape
-            compressor_scale = scale
+            output = output.clip(min=quantizer_module.level_low, max=quantizer_module.level_high)
 
             if quantizer_module.num_bits == 8:
                 decompressor = INT8AsymmetricWeightsDecompressor(
-                    scale=compressor_scale,
+                    scale=scale,
                     zero_point=zero_point.to(torch.uint8),
                     result_dtype=w.dtype
                 )
             else:
                 decompressor = INT4AsymmetricWeightsDecompressor(
-                    scale=compressor_scale,
+                    scale=scale,
                     zero_point=zero_point.to(torch.uint8),
                     compressed_weight_shape=output.shape,
-                    result_shape=original_shape,
+                    result_shape=w.shape,
                     result_dtype=w.dtype,
                 )
             packed_tensor = decompressor.pack_weight(output.to(torch.uint8))
@@ -124,48 +121,26 @@ def strip_tuned_lora_model(model: NNCFNetwork) -> NNCFNetwork:
             if w is None or not isinstance(w, torch.nn.Parameter):
                 raise nncf.InternalError(f"Could not find a torch.nn.Parameter in the model by name {weight_name}.")
 
-
-            ll_lh = quantizer_module.level_low / quantizer_module.level_high
-
-            signed_scale = True
-            if signed_scale and quantizer_module.level_low != 0:
-                scale = torch.where(torch.abs(quantizer_module.scale) < quantizer_module.eps, quantizer_module.eps, quantizer_module.scale)
-                # range: [-s, 7/8s] if s>0 else [7/8s,-s]
-                input_low = torch.where(scale > 0, -scale, -scale / ll_lh)
-                input_range = torch.abs((2 + 1 / quantizer_module.level_low) * scale)  # 15/8s or (2-1/8)s
-            else:
-                scale = abs(quantizer_module.scale) + quantizer_module.eps
-                input_low = scale * ll_lh
-                input_range = scale - input_low
-
-            level_high = (2 ** (quantizer_module.num_bits - 1) - 1)
-
-            input_low = input_low.to(w.dtype)
-            input_range = input_range.to(w.dtype)
-
+            max_value = quantizer_module.scale.to(w.dtype)
             input_ = w + quantizer_module._lora_B @ quantizer_module._lora_A
             input_ = input_.to(w.dtype)
             input_ = input_.reshape(quantizer_module._qspec.weight_shape)
 
-            scale = level_high / scale
-            
-            output = input_.clip(min=input_low, max=input_low + input_range)
-            output = output * scale
+            scale = max_value / abs(quantizer_module.level_low)
+            output = input_ / scale
             output = output.round()
-
-            original_shape = w.shape
-            compressor_scale = 1 / scale
+            output = output.clip(min=quantizer_module.level_low, max=quantizer_module.level_high)
 
             if quantizer_module.num_bits == 8:
                 decompressor = INT8SymmetricWeightsDecompressor(
-                    scale=compressor_scale,
+                    scale=scale,
                     result_dtype=w.dtype
                 )
             else:
                 decompressor = INT4SymmetricWeightsDecompressor(
-                    scale=compressor_scale,
+                    scale=scale,
                     compressed_weight_shape=output.shape,
-                    result_shape=original_shape,
+                    result_shape=w.shape,
                     result_dtype=w.dtype,
                 )
 
