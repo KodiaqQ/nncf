@@ -13,7 +13,9 @@ from nncf.torch.model_graph_manager import split_const_name
 from nncf.torch.model_transformer import PTModelTransformer
 from nncf.torch.nncf_network import NNCFNetwork
 from nncf.torch.quantization.layers import AsymmetricQuantizer
+from nncf.torch.quantization.layers import SymmetricQuantizer
 from nncf.torch.quantization.layers import INT4AsymmetricWeightsDecompressor, INT8AsymmetricWeightsDecompressor
+from nncf.torch.quantization.layers import INT4SymmetricWeightsDecompressor, INT8SymmetricWeightsDecompressor
 from nncf.torch.quantization.quantize_functions import TuneRange
 
 def strip_tuned_lora_model(model: NNCFNetwork) -> NNCFNetwork:
@@ -64,7 +66,7 @@ def strip_tuned_lora_model(model: NNCFNetwork) -> NNCFNetwork:
             output = output.to(output_dtype)
 
             original_shape = w.shape
-            compressor_scale = 1 / scale
+            compressor_scale = scale
 
             if quantizer_module.num_bits == 8:
                 decompressor = INT8AsymmetricWeightsDecompressor(
@@ -80,8 +82,94 @@ def strip_tuned_lora_model(model: NNCFNetwork) -> NNCFNetwork:
                     result_shape=original_shape,
                     result_dtype=w.dtype,
                 )
-
             packed_tensor = decompressor.pack_weight(output.to(torch.uint8))
+
+            # tmp = decompressor(packed_tensor)
+
+            # sets compressed tensor
+            compressed_parameter = torch.nn.Parameter(packed_tensor, requires_grad=False)
+            setattr(module, weight_attr_name, compressed_parameter)
+
+            consumer_nodes = graph.get_next_nodes(weight_node)
+            if len(consumer_nodes) > 1:
+                for c_node in consumer_nodes:
+                    c_module = model.get_module_by_scope(Scope.from_str(c_node.layer_name))
+                    for name, param in c_module.named_parameters(recurse=False, remove_duplicate=False):
+                        if id(param) == id(w):
+                            setattr(c_module, name, compressed_parameter)
+
+            # registry weight decompression module in the model
+            decompressor_name = f"weights_decompressor_{weight_node.node_name.replace('.', '_')}"
+
+            # inserts the weight decompressor into the model as the post hook on the model weight
+            transformation_layout.register(
+                PTSharedFnInsertionCommand(
+                    [PTTargetPoint(TargetType.OPERATOR_POST_HOOK, target_node_name=weight_node.node_name)],
+                    decompressor,
+                    decompressor_name,
+                )
+            )
+
+        elif isinstance(quantizer_module, SymmetricQuantizer):
+            assert len(command.target_points) == 1
+            tp = command.target_points[0]
+
+            node_with_weight = graph.get_node_by_name(tp.target_node_name)
+
+            weight_node = get_const_node(node_with_weight, tp.input_port_id, graph)
+            weight_name = weight_node.layer_attributes.name
+            module_name, weight_attr_name = split_const_name(weight_name)
+            module = get_module_by_name(module_name, model)
+            w = getattr(module, weight_attr_name)
+            if w is None or not isinstance(w, torch.nn.Parameter):
+                raise nncf.InternalError(f"Could not find a torch.nn.Parameter in the model by name {weight_name}.")
+
+
+            ll_lh = quantizer_module.level_low / quantizer_module.level_high
+
+            signed_scale = True
+            if signed_scale and quantizer_module.level_low != 0:
+                scale = torch.where(torch.abs(quantizer_module.scale) < quantizer_module.eps, quantizer_module.eps, quantizer_module.scale)
+                # range: [-s, 7/8s] if s>0 else [7/8s,-s]
+                input_low = torch.where(scale > 0, -scale, -scale / ll_lh)
+                input_range = torch.abs((2 + 1 / quantizer_module.level_low) * scale)  # 15/8s or (2-1/8)s
+            else:
+                scale = abs(quantizer_module.scale) + quantizer_module.eps
+                input_low = scale * ll_lh
+                input_range = scale - input_low
+
+            level_high = (2 ** (quantizer_module.num_bits - 1) - 1)
+
+            input_low = input_low.to(w.dtype)
+            input_range = input_range.to(w.dtype)
+
+            input_ = w + quantizer_module._lora_B @ quantizer_module._lora_A
+            input_ = input_.to(w.dtype)
+            input_ = input_.reshape(quantizer_module._qspec.weight_shape)
+
+            scale = level_high / scale
+            
+            output = input_.clip(min=input_low, max=input_low + input_range)
+            output = output * scale
+            output = output.round()
+
+            original_shape = w.shape
+            compressor_scale = 1 / scale
+
+            if quantizer_module.num_bits == 8:
+                decompressor = INT8SymmetricWeightsDecompressor(
+                    scale=compressor_scale,
+                    result_dtype=w.dtype
+                )
+            else:
+                decompressor = INT4SymmetricWeightsDecompressor(
+                    scale=compressor_scale,
+                    compressed_weight_shape=output.shape,
+                    result_shape=original_shape,
+                    result_dtype=w.dtype,
+                )
+
+            packed_tensor = decompressor.pack_weight(output.to(torch.int8))
 
             # tmp = decompressor(packed_tensor)
 
