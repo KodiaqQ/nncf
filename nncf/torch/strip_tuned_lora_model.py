@@ -64,7 +64,7 @@ def strip_tuned_lora_model(model: NNCFNetwork) -> NNCFNetwork:
             output = output.to(output_dtype)
 
             original_shape = w.shape
-            compressor_scale = 1 / scale
+            compressor_scale = scale
 
             if quantizer_module.num_bits == 8:
                 decompressor = INT8AsymmetricWeightsDecompressor(
@@ -80,7 +80,6 @@ def strip_tuned_lora_model(model: NNCFNetwork) -> NNCFNetwork:
                     result_shape=original_shape,
                     result_dtype=w.dtype,
                 )
-
             packed_tensor = decompressor.pack_weight(output.to(torch.uint8))
 
             # tmp = decompressor(packed_tensor)
