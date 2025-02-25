@@ -50,6 +50,9 @@ def strip_tuned_lora_model(model: NNCFNetwork) -> NNCFNetwork:
             original_dtype = w.dtype
             original_shape = w.shape
 
+            input_low = input_low.to(original_dtype)
+            input_range = input_range.to(original_dtype)
+
             qdq_output = quantizer_module.quantize(w)
             qdq_output = qdq_output.reshape(quantizer_module._qspec.weight_shape)
 
