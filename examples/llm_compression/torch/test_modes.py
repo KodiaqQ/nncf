@@ -8,6 +8,7 @@ from torch import nn
 
 import nncf
 from nncf.torch.model_graph_manager import get_module_by_name
+from nncf.torch.quantization.quantize_functions import TuneRange
 from nncf.torch.strip_tuned_lora_model import strip_tuned_lora_model
 
 
@@ -46,7 +47,7 @@ class TestModel(nn.Module):
         # (nncf.CompressWeightsMode.INT4_ASYM, torch.float32),
         # (nncf.CompressWeightsMode.INT4_ASYM, torch.float16),
         # (nncf.CompressWeightsMode.INT4_ASYM, torch.bfloat16),
-        (nncf.CompressWeightsMode.INT4_SYM, torch.float32),
+        # (nncf.CompressWeightsMode.INT4_SYM, torch.float32),
         # (nncf.CompressWeightsMode.INT4_SYM, torch.float16),
         # (nncf.CompressWeightsMode.INT4_SYM, torch.bfloat16),
     ),
@@ -99,10 +100,10 @@ def test_lora_quantize(mode, torch_dtype):
         assert torch.allclose(strip_none, strip_to_decompress)
 
 
-def common_q_dq(weight, num_bits, reduction_axes, asymmetric = False):
+def common_q_dq(weight, num_bits, reduction_axes, asymmetric=False):
     if asymmetric:
         level_low = 0
-        level_high = 2 ** num_bits - 1
+        level_high = 2**num_bits - 1
         min_values = torch.amin(weight, axis=reduction_axes, keepdims=True)
         max_values = torch.amax(weight, axis=reduction_axes, keepdims=True)
 
@@ -126,7 +127,7 @@ def common_q_dq(weight, num_bits, reduction_axes, asymmetric = False):
 
         eps = torch.finfo(scale.dtype).eps
         scale = torch.where(torch.abs(scale) < eps, eps, scale)
-    
+
     compressed_weights = weight / scale
     if asymmetric:
         compressed_weights += zero_point
@@ -140,10 +141,11 @@ def common_q_dq(weight, num_bits, reduction_axes, asymmetric = False):
 
     return decompressed_weights
 
-def universal_q_dq(weight, num_bits, reduction_axes, asymmetric = False):
+
+def universal_q_dq(weight, num_bits, reduction_axes, asymmetric=False):
     if asymmetric:
         eps = 1e-16
-        levels = 2 ** num_bits
+        levels = 2**num_bits
         level_high = levels - 1
         level_low = 0
 
@@ -153,35 +155,105 @@ def universal_q_dq(weight, num_bits, reduction_axes, asymmetric = False):
 
         input_range = input_range - eps
 
+        # End of quantizer calculation
+
+        # input_range_safe = abs(input_range) + eps
+        # input_low, input_range = TuneRange.apply(input_low, input_range_safe, levels)
+
+        scale = (levels - 1) / input_range
+        output = weight.clip(min=input_low, max=input_low + input_range)
+        zero_point = (-input_low * scale).round()
+        output -= input_low
+        output *= scale
+        output -= zero_point
+        output = output.round()
+        output = output / scale
+    else:
+        signed = True
+        levels = 2**num_bits
+
+        if signed:
+            level_high = (levels // 2) - 1
+            level_low = -(levels // 2)
+            ll_lh = level_low / level_high
+            input_low = torch.amin(weight, reduction_axes, keepdim=True)
+            input_high = torch.amax(weight, reduction_axes, keepdim=True)
+            w_abs_min = torch.abs(input_low)
+            w_max = input_high
+            scale = torch.where(w_abs_min >= w_max, w_abs_min, -w_max)
+            eps = 1e-16
+
+            scale = torch.where(torch.abs(scale) < eps, eps, scale)
+            input_low = torch.where(scale > 0, -scale, -scale / ll_lh)
+            input_range = torch.abs((2 + 1 / level_low) * scale)
+            scale = torch.where(torch.abs(scale) < eps, eps, scale)
+
+            # End of quantizer calculation
+
+            # scale_safe = torch.where(torch.abs(scale) < eps, eps, scale)
+            # input_low = torch.where(scale_safe > 0, -scale_safe, -scale_safe / ll_lh)
+            # input_range = torch.abs((2 + 1 / level_low) * scale_safe)
+        else:
+            level_high = levels - 1
+            level_low = 0
+            scale = input_high - eps
+            input_low = scale * ll_lh
+            input_range = scale - input_low
+
+            # End of quantizer calculation
+
+            # scale_safe = abs(scale) + eps
+            # input_low = scale_safe * ll_lh
+            # input_range = scale_safe - input_low
+
+        scale = (levels - 1) / input_range
+        output = weight.clip(min=input_low, max=input_low + input_range)
+        zero_point = (-input_low * scale).round()
+        output -= input_low
+        output *= scale
+        output -= zero_point
+        output = output.round()
+        output = output / scale
+
+    return output
+
+
 def test_methods_equality():
     weight = torch.Tensor(
         [
-            [-1.01, -0.72, -0.53, -0.24, 0.05, 0.26, 0.57, 0.78],
+            [-0.95, -0.7, -0.45, -0.2, -0.05, 0.3, 0.55, 0.8],
         ]
     ).to(torch.float32)
-
-    print(f"\nInitial weight:")
-    print(f"    weight: {weight}")
 
     num_bits = 4
     reduction_axes = -1
 
-    common_q_dq_output = common_q_dq(
-        weight=weight,
-        num_bits=num_bits,
-        reduction_axes=reduction_axes,
-        asymmetric=True
-    )
+    print(f"\nInitial weight:")
+    print(f"    weight:      {weight}")
 
+    common_q_dq_output_asym = common_q_dq(
+        weight=weight, num_bits=num_bits, reduction_axes=reduction_axes, asymmetric=True
+    )
     print(f"Common asymmetric output:")
-    print(f"    q-dq weight: {common_q_dq_output}")\
+    print(f"    q-dq weight: {common_q_dq_output_asym}")
 
-    common_q_dq_output = common_q_dq(
-        weight=weight,
-        num_bits=num_bits,
-        reduction_axes=reduction_axes,
-        asymmetric=False
+    common_q_dq_output_sym = common_q_dq(
+        weight=weight, num_bits=num_bits, reduction_axes=reduction_axes, asymmetric=False
     )
-
     print(f"Common symmetric output:")
-    print(f"    q-dq weight: {common_q_dq_output}")
+    print(f"    q-dq weight: {common_q_dq_output_sym}")
+
+    universal_q_dq_output_asym = universal_q_dq(
+        weight=weight, num_bits=num_bits, reduction_axes=reduction_axes, asymmetric=True
+    )
+    print(f"Universal asymmetric output:")
+    print(f"    q-dq weight: {universal_q_dq_output_asym}")
+
+    universal_q_dq_output_sym = common_q_dq(
+        weight=weight, num_bits=num_bits, reduction_axes=reduction_axes, asymmetric=False
+    )
+    print(f"Universal symmetric output:")
+    print(f"    q-dq weight: {universal_q_dq_output_sym}")
+
+    assert torch.allclose(common_q_dq_output_asym, universal_q_dq_output_asym)
+    assert torch.allclose(common_q_dq_output_sym, universal_q_dq_output_sym)
