@@ -150,13 +150,13 @@ def universal_q_dq(weight, num_bits, reduction_axes, asymmetric=False):
         input_range = input_high - input_low
 
         scale = (levels - 1) / input_range
-        zero_point = (-input_low * scale).round()
+        zero_point = torch.round(-input_low * scale)
 
-        output = weight.clip(min=input_low, max=input_low + input_range)
+        output = torch.clip(weight, min=input_low, max=input_low + input_range)
         output = output - input_low
         output = output * scale
         output = output - zero_point
-        output = output.round()
+        output = torch.round(output)
         output = output / scale
     else:
         signed = True
@@ -183,13 +183,13 @@ def universal_q_dq(weight, num_bits, reduction_axes, asymmetric=False):
             input_range = scale - input_low
 
         scale = (levels - 1) / input_range
-        zero_point = (-input_low * scale).round()
+        zero_point = torch.round(-input_low * scale)
 
-        output = weight.clip(min=input_low, max=input_low + input_range)
+        output = torch.clip(weight, min=input_low, max=input_low + input_range)
         output -= input_low
         output *= scale
         output -= zero_point
-        output = output.round()
+        output = torch.round(output)
         output = output / scale
 
     return output
