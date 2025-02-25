@@ -103,18 +103,23 @@ def test_lora_quantize(mode, torch_dtype):
 def common_q_dq(weight, num_bits, reduction_axes, asymmetric=False):
     if asymmetric:
         level_low = 0
-        level_high = 2**num_bits - 1
+        level_high = 2 ** num_bits - 1
         min_values = torch.amin(weight, axis=reduction_axes, keepdims=True)
         max_values = torch.amax(weight, axis=reduction_axes, keepdims=True)
 
         levels = level_high - level_low + 1
         scale = (max_values - min_values) / (levels - 1)
 
-        # eps = torch.finfo(scale.dtype).eps
-
-        # scale = torch.where(torch.abs(scale) < eps, eps, scale)
         zero_point = level_low - torch.round(min_values / scale)
         zero_point = torch.clip(zero_point, level_low, level_high)
+
+        compressed_weights = weight / scale
+        compressed_weights = compressed_weights + zero_point
+        compressed_weights = torch.round(compressed_weights)
+        compressed_weights = torch.clip(compressed_weights, level_low, level_high)
+
+        decompressed_weights = compressed_weights - zero_point
+        decompressed_weights = decompressed_weights * scale
     else:
         level_low = -(2 ** (num_bits - 1))
         level_high = 2 ** (num_bits - 1)
@@ -125,27 +130,18 @@ def common_q_dq(weight, num_bits, reduction_axes, asymmetric=False):
         scale = torch.where(w_abs_min >= w_max, w_abs_min, -w_max)
         scale /= level_high
 
-        # eps = torch.finfo(scale.dtype).eps
-        # scale = torch.where(torch.abs(scale) < eps, eps, scale)
+        compressed_weights = weight / scale
+        compressed_weights = torch.round(compressed_weights)
+        compressed_weights = torch.clip(compressed_weights, level_low, level_high)
 
-    compressed_weights = weight / scale
-    if asymmetric:
-        compressed_weights += zero_point
-    compressed_weights = torch.round(compressed_weights)
-    compressed_weights = torch.clip(compressed_weights, level_low, level_high)
-
-    decompressed_weights = compressed_weights
-    if asymmetric:
-        decompressed_weights -= zero_point
-    decompressed_weights = decompressed_weights * scale
+        decompressed_weights = compressed_weights * scale
 
     return decompressed_weights
 
 
 def universal_q_dq(weight, num_bits, reduction_axes, asymmetric=False):
     if asymmetric:
-        # eps = 1e-16
-        levels = 2**num_bits
+        levels = 2 ** num_bits
         level_high = levels - 1
         level_low = 0
 
@@ -153,19 +149,13 @@ def universal_q_dq(weight, num_bits, reduction_axes, asymmetric=False):
         input_high = torch.amax(weight, reduction_axes, keepdim=True)
         input_range = input_high - input_low
 
-        # input_range = input_range - eps
-
-        # End of quantizer calculation
-
-        # input_range_safe = abs(input_range) + eps
-        # input_low, input_range = TuneRange.apply(input_low, input_range_safe, levels)
-
         scale = (levels - 1) / input_range
-        output = weight.clip(min=input_low, max=input_low + input_range)
         zero_point = (-input_low * scale).round()
-        output -= input_low
-        output *= scale
-        output -= zero_point
+
+        output = weight.clip(min=input_low, max=input_low + input_range)
+        output = output - input_low
+        output = output * scale
+        output = output - zero_point
         output = output.round()
         output = output / scale
     else:
@@ -181,35 +171,21 @@ def universal_q_dq(weight, num_bits, reduction_axes, asymmetric=False):
             w_abs_min = torch.abs(input_low)
             w_max = input_high
             scale = torch.where(w_abs_min >= w_max, w_abs_min, -w_max)
-            # eps = 1e-16
 
-            # scale = torch.where(torch.abs(scale) < eps, eps, scale)
             input_low = torch.where(scale > 0, -scale, -scale / ll_lh)
             input_range = torch.abs((2 + 1 / level_low) * scale)
-            # scale = torch.where(torch.abs(scale) < eps, eps, scale)
-
-            # End of quantizer calculation
-
-            # scale_safe = torch.where(torch.abs(scale) < eps, eps, scale)
-            # input_low = torch.where(scale_safe > 0, -scale_safe, -scale_safe / ll_lh)
-            # input_range = torch.abs((2 + 1 / level_low) * scale_safe)
         else:
             level_high = levels - 1
             level_low = 0
             scale = input_high
-            # scale = input_high - eps
+
             input_low = scale * ll_lh
             input_range = scale - input_low
 
-            # End of quantizer calculation
-
-            # scale_safe = abs(scale) + eps
-            # input_low = scale_safe * ll_lh
-            # input_range = scale_safe - input_low
-
         scale = (levels - 1) / input_range
-        output = weight.clip(min=input_low, max=input_low + input_range)
         zero_point = (-input_low * scale).round()
+
+        output = weight.clip(min=input_low, max=input_low + input_range)
         output -= input_low
         output *= scale
         output -= zero_point
