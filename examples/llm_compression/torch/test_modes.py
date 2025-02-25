@@ -22,9 +22,9 @@ def set_seed(seed):
     torch.backends.cudnn.deterministic = True
 
 
-set_seed(0)
+set_seed(999)
 
-MAIN_DIM = 256
+MAIN_DIM = 2048
 LAST_DIM = 8
 MAIN_WEIGHT = torch.rand(LAST_DIM, MAIN_DIM) - 0.5
 
