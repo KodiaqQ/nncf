@@ -8,7 +8,6 @@ from torch import nn
 
 import nncf
 from nncf.torch.model_graph_manager import get_module_by_name
-from nncf.torch.quantization.quantize_functions import TuneRange
 from nncf.torch.strip_tuned_lora_model import strip_tuned_lora_model
 
 
@@ -24,8 +23,8 @@ def set_seed(seed):
 
 set_seed(11)
 
-MAIN_DIM = 16
-LAST_DIM = 2
+MAIN_DIM = 8
+LAST_DIM = 8
 MAIN_WEIGHT = torch.rand(LAST_DIM, MAIN_DIM) - 0.5
 
 
@@ -44,16 +43,15 @@ class TestModel(nn.Module):
 @pytest.mark.parametrize(
     ("mode", "torch_dtype"),
     (
-        (nncf.CompressWeightsMode.INT4_ASYM, torch.float32),
+        # (nncf.CompressWeightsMode.INT4_ASYM, torch.float32),
         # (nncf.CompressWeightsMode.INT4_ASYM, torch.float16),
         # (nncf.CompressWeightsMode.INT4_ASYM, torch.bfloat16),
-        # (nncf.CompressWeightsMode.INT4_SYM, torch.float32),
+        (nncf.CompressWeightsMode.INT4_SYM, torch.float32),
         # (nncf.CompressWeightsMode.INT4_SYM, torch.float16),
         # (nncf.CompressWeightsMode.INT4_SYM, torch.bfloat16),
     ),
 )
 def test_lora_quantize(mode, torch_dtype):
-    pytest.skip()
     model = TestModel(torch_dtype=torch_dtype)
     with torch.no_grad():
         example = torch.ones(model.INPUT_SIZE).to(torch_dtype)
@@ -101,70 +99,64 @@ def test_lora_quantize(mode, torch_dtype):
         assert torch.allclose(strip_none, strip_to_decompress)
 
 
-def common_quantize_asymmetric(weight, num_bits, reduction_axes):
-    level_low = 0
-    level_high = 2**num_bits - 1
-    min_values = torch.amin(weight, reduction_axes, keepdims=True)
-    max_values = torch.amax(weight, reduction_axes, keepdims=True)
+def common_q_dq(weight, num_bits, reduction_axes, asymmetric = False):
+    if asymmetric:
+        level_low = 0
+        level_high = 2 ** num_bits - 1
+        min_values = torch.amin(weight, axis=reduction_axes, keepdims=True)
+        max_values = torch.amax(weight, axis=reduction_axes, keepdims=True)
 
-    levels = level_high - level_low + 1
-    scale = ((max_values - min_values) / (levels - 1)).to(torch.float32)
-    eps = torch.finfo(scale.dtype).eps
-    scale = torch.where(torch.abs(scale) < eps, eps, scale)
+        levels = level_high - level_low + 1
+        scale = (max_values - min_values) / (levels - 1)
 
-    zero_point = level_low - torch.round(min_values / scale)
-    zero_point = torch.clip(zero_point.to(torch.int32), level_low, level_high)
+        eps = torch.finfo(scale.dtype).eps
 
-    q_weight = weight / scale
-    q_weight = q_weight + zero_point.to(weight.dtype)
-    q_weight = torch.round(q_weight)
-    q_weight = torch.clip(q_weight, level_low, level_high).to(torch.uint8)
+        scale = torch.where(torch.abs(scale) < eps, eps, scale)
+        zero_point = level_low - torch.round(min_values / scale)
+        zero_point = torch.clip(zero_point, level_low, level_high)
+    else:
+        level_low = -(2 ** (num_bits - 1))
+        level_high = 2 ** (num_bits - 1)
 
-    return q_weight, scale, zero_point
+        w_abs_min = torch.abs(torch.amin(weight, axis=reduction_axes, keepdims=True))
+        w_max = torch.amax(weight, axis=reduction_axes, keepdims=True)
 
+        scale = torch.where(w_abs_min >= w_max, w_abs_min, -w_max)
+        scale /= level_high
 
-def common_dequantize_asymetric(q_weight, scale, zero_point):
-    weight = q_weight - zero_point
-    weight = weight * scale
-    return weight
+        eps = torch.finfo(scale.dtype).eps
+        scale = torch.where(torch.abs(scale) < eps, eps, scale)
+    
+    compressed_weights = weight / scale
+    if asymmetric:
+        compressed_weights += zero_point
+    compressed_weights = torch.round(compressed_weights)
+    compressed_weights = torch.clip(compressed_weights, level_low, level_high)
 
+    decompressed_weights = compressed_weights
+    if asymmetric:
+        compressed_weights -= zero_point
+    decompressed_weights = decompressed_weights * scale
 
-def universal_quantize_asymmetric(weight, num_bits, reduction_axes):
-    level_low = 0
-    level_high = 2**num_bits - 1
-    min_values = torch.amin(weight, reduction_axes, keepdims=True)
-    max_values = torch.amax(weight, reduction_axes, keepdims=True)
+    return decompressed_weights
 
-    levels = level_high - level_low + 1
-    eps = 1e-16
-    input_range = max_values - min_values
-    input_range = input_range - eps
+def universal_q_dq(weight, num_bits, reduction_axes, asymmetric = False):
+    if asymmetric:
+        eps = 1e-16
+        levels = 2 ** num_bits
+        level_high = levels - 1
+        level_low = 0
 
-    input_range_safe = torch.abs(input_range) + eps
-    min_values, input_range = TuneRange.apply(min_values, input_range_safe, levels)
+        input_low = torch.amin(weight, reduction_axes, keepdim=True)
+        input_high = torch.amax(weight, reduction_axes, keepdim=True)
+        input_range = input_high - input_low
 
-    scale = (levels - 1) / input_range
-    zero_point = (-min_values * scale).round()
-
-    q_weight = weight.clip(min=min_values, max=max_values)
-    q_weight = q_weight - min_values
-    q_weight = q_weight * scale
-    q_weight = q_weight.round()
-
-    return q_weight, scale, zero_point
-
-
-def universal_dequantize_asymetric(q_weight, scale, zero_point):
-    weight = q_weight - zero_point
-    weight = weight / scale
-    return weight
-
+        input_range = input_range - eps
 
 def test_methods_equality():
-
     weight = torch.Tensor(
         [
-            [-1, -0.75, -0.5, -0.25, 0, 0.25, 0.5, 0.75],
+            [-1.01, -0.72, -0.53, -0.24, 0.05, 0.26, 0.57, 0.78],
         ]
     ).to(torch.float32)
 
@@ -172,36 +164,24 @@ def test_methods_equality():
     print(f"    weight: {weight}")
 
     num_bits = 4
-    reduction_axes = 1
+    reduction_axes = -1
 
-    common_quantized_weight, common_scale, common_zero_point = common_quantize_asymmetric(
+    common_q_dq_output = common_q_dq(
         weight=weight,
         num_bits=num_bits,
         reduction_axes=reduction_axes,
+        asymmetric=True
     )
 
-    common_dequantized_weight = common_dequantize_asymetric(common_quantized_weight, common_scale, common_zero_point)
+    print(f"Common asymmetric output:")
+    print(f"    q-dq weight: {common_q_dq_output}")\
 
-    print(f"Common quantized asymmetric:")
-    print(f"    weight: {common_quantized_weight}")
-    print(f"    scale: {common_scale}")
-    print(f"    zero point: {common_zero_point}")
-    print(f"Common dequantized asymmetric:")
-    print(f"    weight: {common_dequantized_weight}")
-
-    universal_quantized_weight, universal_scale, universal_zero_point = universal_quantize_asymmetric(
+    common_q_dq_output = common_q_dq(
         weight=weight,
         num_bits=num_bits,
         reduction_axes=reduction_axes,
+        asymmetric=False
     )
 
-    universal_dequantized_weight = universal_dequantize_asymetric(
-        universal_quantized_weight, universal_scale, universal_zero_point
-    )
-
-    print(f"Universal quantized asymmetric:")
-    print(f"    weight: {universal_quantized_weight}")
-    print(f"    scale: {universal_scale}")
-    print(f"    zero point: {universal_zero_point}")
-    print(f"Universal dequantized asymmetric:")
-    print(f"    weight: {universal_dequantized_weight}")
+    print(f"Common symmetric output:")
+    print(f"    q-dq weight: {common_q_dq_output}")
