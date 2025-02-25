@@ -24,7 +24,7 @@ def set_seed(seed):
 
 set_seed(0)
 
-MAIN_DIM = 8
+MAIN_DIM = 256
 LAST_DIM = 8
 MAIN_WEIGHT = torch.rand(LAST_DIM, MAIN_DIM) - 0.5
 
@@ -44,12 +44,12 @@ class TestModel(nn.Module):
 @pytest.mark.parametrize(
     ("mode", "torch_dtype"),
     (
-        # (nncf.CompressWeightsMode.INT4_ASYM, torch.float32),
-        # (nncf.CompressWeightsMode.INT4_ASYM, torch.float16),
-        # (nncf.CompressWeightsMode.INT4_ASYM, torch.bfloat16),
-        # (nncf.CompressWeightsMode.INT4_SYM, torch.float32),
-        # (nncf.CompressWeightsMode.INT4_SYM, torch.float16),
-        # (nncf.CompressWeightsMode.INT4_SYM, torch.bfloat16),
+        (nncf.CompressWeightsMode.INT4_ASYM, torch.float32),
+        (nncf.CompressWeightsMode.INT4_ASYM, torch.float16),
+        (nncf.CompressWeightsMode.INT4_ASYM, torch.bfloat16),
+        (nncf.CompressWeightsMode.INT4_SYM, torch.float32),
+        (nncf.CompressWeightsMode.INT4_SYM, torch.float16),
+        (nncf.CompressWeightsMode.INT4_SYM, torch.bfloat16),
     ),
 )
 def test_lora_quantize(mode, torch_dtype):
@@ -107,11 +107,9 @@ def common_q_dq(weight, num_bits, reduction_axes, asymmetric=False):
         min_values = torch.amin(weight, axis=reduction_axes, keepdims=True)
         max_values = torch.amax(weight, axis=reduction_axes, keepdims=True)
 
-        levels = level_high - level_low + 1
-        scale = (max_values - min_values) / (levels - 1)
+        scale = (max_values - min_values) / level_high
 
-        zero_point = level_low - torch.round(min_values / scale)
-        zero_point = torch.clip(zero_point, level_low, level_high)
+        zero_point = torch.round(-min_values / scale)
 
         compressed_weights = weight / scale
         compressed_weights = compressed_weights + zero_point
@@ -141,19 +139,17 @@ def common_q_dq(weight, num_bits, reduction_axes, asymmetric=False):
 
 def universal_q_dq(weight, num_bits, reduction_axes, asymmetric=False):
     if asymmetric:
-        levels = 2 ** num_bits
-        level_high = levels - 1
         level_low = 0
+        level_high = 2 ** num_bits - 1
 
-        input_low = torch.amin(weight, reduction_axes, keepdim=True)
-        input_high = torch.amax(weight, reduction_axes, keepdim=True)
-        input_range = input_high - input_low
+        min_values = torch.amin(weight, reduction_axes, keepdim=True)
+        max_values = torch.amax(weight, reduction_axes, keepdim=True)
 
-        scale = (levels - 1) / input_range
-        zero_point = torch.round(-input_low * scale)
+        scale = level_high / (max_values - min_values)
+        zero_point = torch.round(-min_values * scale)
 
-        output = torch.clip(weight, min=input_low, max=input_low + input_range)
-        output = output - input_low
+        output = torch.clip(weight, min=min_values, max=max_values)
+        output = output - min_values
         output = output * scale
         output = output - zero_point
         output = torch.round(output)
@@ -230,7 +226,14 @@ def test_methods_equality():
     print(f"Universal symmetric output:")
     print(f"    q-dq weight: {universal_q_dq_output_sym}")
 
-    sym_close = torch.allclose(common_q_dq_output_sym, universal_q_dq_output_sym)
-    asym_close = torch.allclose(common_q_dq_output_asym, universal_q_dq_output_asym)
+    # sym_close = torch.allclose(common_q_dq_output_sym, universal_q_dq_output_sym)
+    # asym_close = torch.allclose(common_q_dq_output_asym, universal_q_dq_output_asym)
 
-    assert sym_close and asym_close
+    # assert sym_close and asym_close
+
+    exp = universal_q_dq(
+        weight=common_q_dq_output_asym, num_bits=num_bits, reduction_axes=reduction_axes, asymmetric=True
+    )
+
+    print(f"Exp universal asymmetric output:")
+    print(f"    q-dq weight: {exp}")

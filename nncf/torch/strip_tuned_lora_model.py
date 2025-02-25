@@ -46,40 +46,43 @@ def strip_tuned_lora_model(model: NNCFNetwork) -> NNCFNetwork:
             w = getattr(module, weight_attr_name)
             if w is None or not isinstance(w, torch.nn.Parameter):
                 raise nncf.InternalError(f"Could not find a torch.nn.Parameter in the model by name {weight_name}.")
+            
+            original_dtype = w.dtype
+            original_shape = w.shape
 
-            input_low = input_low.to(w.dtype)
-            input_range = input_range.to(w.dtype)
+            input_low = input_low.to(original_dtype)
+            input_range = input_range.to(original_dtype)
 
-            input_ = w + quantizer_module._lora_B @ quantizer_module._lora_A
-            input_ = input_.reshape(quantizer_module._qspec.weight_shape)
-            input_ = input_.to(w.dtype)
+            qdq_output = quantizer_module.quantize(w)
+            qdq_output = qdq_output.reshape(quantizer_module._qspec.weight_shape)
 
-            scale = input_range / (quantizer_module.levels - 1)
-            scale = torch.where(torch.abs(scale) < quantizer_module.eps, quantizer_module.eps, scale)
-            zero_point = quantizer_module.level_low - (input_low / scale).round()
-            zero_point = zero_point.clip(min=quantizer_module.level_low, max=quantizer_module.level_high)
+            # Weight lowering
+            scale = input_range / quantizer_module.level_high
 
-            output = input_ / scale
-            output = output + zero_point
-            output = output.round()
-            output = output.clip(min=quantizer_module.level_low, max=quantizer_module.level_high)
-            output = output.to(torch.uint8)
+            zero_point = torch.round(-input_low / scale)
+
+            q_output = qdq_output / scale
+            q_output = q_output + zero_point
+            q_output = torch.round(q_output)
+            q_output = torch.clip(q_output, quantizer_module.level_low, quantizer_module.level_high)
+            q_output = q_output.to(torch.uint8)
 
             if quantizer_module.num_bits == 8:
                 decompressor = INT8AsymmetricWeightsDecompressor(
                     scale=scale,
-                    zero_point=zero_point.to(torch.uint8),
-                    result_dtype=w.dtype
+                    zero_point=zero_point,
+                    result_dtype=original_dtype
                 )
             else:
                 decompressor = INT4AsymmetricWeightsDecompressor(
                     scale=scale,
-                    zero_point=zero_point.to(torch.uint8),
-                    compressed_weight_shape=output.shape,
-                    result_shape=w.shape,
-                    result_dtype=w.dtype,
+                    zero_point=zero_point,
+                    compressed_weight_shape=q_output.shape,
+                    result_shape=original_shape,
+                    result_dtype=original_dtype,
                 )
-            packed_tensor = decompressor.pack_weight(output)
+
+            packed_tensor = decompressor.pack_weight(q_output)
 
             # tmp = decompressor(packed_tensor)
 
@@ -121,19 +124,20 @@ def strip_tuned_lora_model(model: NNCFNetwork) -> NNCFNetwork:
             if w is None or not isinstance(w, torch.nn.Parameter):
                 raise nncf.InternalError(f"Could not find a torch.nn.Parameter in the model by name {weight_name}.")
 
-            max_value = quantizer_module.scale
-            max_value = max_value.to(w.dtype)
-            input_ = w + quantizer_module._lora_B @ quantizer_module._lora_A
-            input_ = input_.to(w.dtype)
-            input_ = input_.reshape(quantizer_module._qspec.weight_shape)
+            original_dtype = w.dtype
+            original_shape = w.shape
 
+            qdq_output = quantizer_module.quantize(w)
+            qdq_output = qdq_output.reshape(quantizer_module._qspec.weight_shape)
+
+            # Weight lowering
             level_high = 2 ** (quantizer_module.num_bits - 1)
-            scale = max_value / level_high
-            scale = torch.where(torch.abs(scale) < quantizer_module.eps, quantizer_module.eps, scale)
-            output = input_ / scale
-            output = output.round()
-            output = output.clip(min=quantizer_module.level_low, max=quantizer_module.level_high)
-            output = output.to(torch.int8)
+            scale = quantizer_module.scale / level_high
+
+            q_output = qdq_output / scale
+            q_output = torch.round(q_output)
+            q_output = torch.clip(q_output, quantizer_module.level_low, quantizer_module.level_high)
+            q_output = q_output.to(torch.int8)
 
             if quantizer_module.num_bits == 8:
                 decompressor = INT8SymmetricWeightsDecompressor(
@@ -143,12 +147,12 @@ def strip_tuned_lora_model(model: NNCFNetwork) -> NNCFNetwork:
             else:
                 decompressor = INT4SymmetricWeightsDecompressor(
                     scale=scale,
-                    compressed_weight_shape=output.shape,
+                    compressed_weight_shape=q_output.shape,
                     result_shape=w.shape,
                     result_dtype=w.dtype,
                 )
 
-            packed_tensor = decompressor.pack_weight(output)
+            packed_tensor = decompressor.pack_weight(q_output)
 
             # tmp = decompressor(packed_tensor)
 
