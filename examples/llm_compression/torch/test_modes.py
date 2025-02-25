@@ -22,7 +22,7 @@ def set_seed(seed):
     torch.backends.cudnn.deterministic = True
 
 
-set_seed(11)
+set_seed(0)
 
 MAIN_DIM = 8
 LAST_DIM = 8
@@ -110,9 +110,9 @@ def common_q_dq(weight, num_bits, reduction_axes, asymmetric=False):
         levels = level_high - level_low + 1
         scale = (max_values - min_values) / (levels - 1)
 
-        eps = torch.finfo(scale.dtype).eps
+        # eps = torch.finfo(scale.dtype).eps
 
-        scale = torch.where(torch.abs(scale) < eps, eps, scale)
+        # scale = torch.where(torch.abs(scale) < eps, eps, scale)
         zero_point = level_low - torch.round(min_values / scale)
         zero_point = torch.clip(zero_point, level_low, level_high)
     else:
@@ -125,8 +125,8 @@ def common_q_dq(weight, num_bits, reduction_axes, asymmetric=False):
         scale = torch.where(w_abs_min >= w_max, w_abs_min, -w_max)
         scale /= level_high
 
-        eps = torch.finfo(scale.dtype).eps
-        scale = torch.where(torch.abs(scale) < eps, eps, scale)
+        # eps = torch.finfo(scale.dtype).eps
+        # scale = torch.where(torch.abs(scale) < eps, eps, scale)
 
     compressed_weights = weight / scale
     if asymmetric:
@@ -136,7 +136,7 @@ def common_q_dq(weight, num_bits, reduction_axes, asymmetric=False):
 
     decompressed_weights = compressed_weights
     if asymmetric:
-        compressed_weights -= zero_point
+        decompressed_weights -= zero_point
     decompressed_weights = decompressed_weights * scale
 
     return decompressed_weights
@@ -144,7 +144,7 @@ def common_q_dq(weight, num_bits, reduction_axes, asymmetric=False):
 
 def universal_q_dq(weight, num_bits, reduction_axes, asymmetric=False):
     if asymmetric:
-        eps = 1e-16
+        # eps = 1e-16
         levels = 2**num_bits
         level_high = levels - 1
         level_low = 0
@@ -153,7 +153,7 @@ def universal_q_dq(weight, num_bits, reduction_axes, asymmetric=False):
         input_high = torch.amax(weight, reduction_axes, keepdim=True)
         input_range = input_high - input_low
 
-        input_range = input_range - eps
+        # input_range = input_range - eps
 
         # End of quantizer calculation
 
@@ -181,12 +181,12 @@ def universal_q_dq(weight, num_bits, reduction_axes, asymmetric=False):
             w_abs_min = torch.abs(input_low)
             w_max = input_high
             scale = torch.where(w_abs_min >= w_max, w_abs_min, -w_max)
-            eps = 1e-16
+            # eps = 1e-16
 
-            scale = torch.where(torch.abs(scale) < eps, eps, scale)
+            # scale = torch.where(torch.abs(scale) < eps, eps, scale)
             input_low = torch.where(scale > 0, -scale, -scale / ll_lh)
             input_range = torch.abs((2 + 1 / level_low) * scale)
-            scale = torch.where(torch.abs(scale) < eps, eps, scale)
+            # scale = torch.where(torch.abs(scale) < eps, eps, scale)
 
             # End of quantizer calculation
 
@@ -196,7 +196,8 @@ def universal_q_dq(weight, num_bits, reduction_axes, asymmetric=False):
         else:
             level_high = levels - 1
             level_low = 0
-            scale = input_high - eps
+            scale = input_high
+            # scale = input_high - eps
             input_low = scale * ll_lh
             input_range = scale - input_low
 
@@ -219,11 +220,9 @@ def universal_q_dq(weight, num_bits, reduction_axes, asymmetric=False):
 
 
 def test_methods_equality():
-    weight = torch.Tensor(
-        [
-            [-0.95, -0.7, -0.45, -0.2, -0.05, 0.3, 0.55, 0.8],
-        ]
-    ).to(torch.float32)
+    # weight = torch.Tensor([[-0.95, -0.7, -0.45, -0.2, -0.05, 0.3, 0.55, 0.8]]).to(torch.float32)
+    weight = torch.randn(1, 8) - 0.5
+    weight = weight.to(torch.float32)
 
     num_bits = 4
     reduction_axes = -1
@@ -255,5 +254,7 @@ def test_methods_equality():
     print(f"Universal symmetric output:")
     print(f"    q-dq weight: {universal_q_dq_output_sym}")
 
-    assert torch.allclose(common_q_dq_output_asym, universal_q_dq_output_asym)
-    assert torch.allclose(common_q_dq_output_sym, universal_q_dq_output_sym)
+    sym_close = torch.allclose(common_q_dq_output_sym, universal_q_dq_output_sym)
+    asym_close = torch.allclose(common_q_dq_output_asym, universal_q_dq_output_asym)
+
+    assert sym_close and asym_close
