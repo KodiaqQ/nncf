@@ -97,6 +97,32 @@ def strip_tuned_lora_model(model: NNCFNetwork) -> NNCFNetwork:
 
             packed_tensor = decompressor.pack_weight(q_output.data)
 
+            # tmp = decompressor(packed_tensor)
+
+            # sets compressed tensor
+            compressed_parameter = torch.nn.Parameter(packed_tensor, requires_grad=False)
+            setattr(module, weight_attr_name, compressed_parameter)
+
+            consumer_nodes = graph.get_next_nodes(weight_node)
+            if len(consumer_nodes) > 1:
+                for c_node in consumer_nodes:
+                    c_module = model.get_module_by_scope(Scope.from_str(c_node.layer_name))
+                    for name, param in c_module.named_parameters(recurse=False, remove_duplicate=False):
+                        if id(param) == id(w):
+                            setattr(c_module, name, compressed_parameter)
+
+            # registry weight decompression module in the model
+            decompressor_name = f"weights_decompressor_{weight_node.node_name.replace('.', '_')}"
+
+            # inserts the weight decompressor into the model as the post hook on the model weight
+            transformation_layout.register(
+                PTSharedFnInsertionCommand(
+                    [PTTargetPoint(TargetType.OPERATOR_POST_HOOK, target_node_name=weight_node.node_name)],
+                    decompressor,
+                    decompressor_name,
+                )
+            )
+
         elif isinstance(quantizer_module, SymmetricQuantizer):
             assert len(command.target_points) == 1
             tp = command.target_points[0]
@@ -145,30 +171,30 @@ def strip_tuned_lora_model(model: NNCFNetwork) -> NNCFNetwork:
 
             packed_tensor = decompressor.pack_weight(q_output)
 
-        # tmp = decompressor(packed_tensor)
+            # tmp = decompressor(packed_tensor)
 
-        # sets compressed tensor
-        compressed_parameter = torch.nn.Parameter(packed_tensor, requires_grad=False)
-        setattr(module, weight_attr_name, compressed_parameter)
+            # sets compressed tensor
+            compressed_parameter = torch.nn.Parameter(packed_tensor, requires_grad=False)
+            setattr(module, weight_attr_name, compressed_parameter)
 
-        consumer_nodes = graph.get_next_nodes(weight_node)
-        if len(consumer_nodes) > 1:
-            for c_node in consumer_nodes:
-                c_module = model.get_module_by_scope(Scope.from_str(c_node.layer_name))
-                for name, param in c_module.named_parameters(recurse=False, remove_duplicate=False):
-                    if id(param) == id(w):
-                        setattr(c_module, name, compressed_parameter)
+            consumer_nodes = graph.get_next_nodes(weight_node)
+            if len(consumer_nodes) > 1:
+                for c_node in consumer_nodes:
+                    c_module = model.get_module_by_scope(Scope.from_str(c_node.layer_name))
+                    for name, param in c_module.named_parameters(recurse=False, remove_duplicate=False):
+                        if id(param) == id(w):
+                            setattr(c_module, name, compressed_parameter)
 
-        # registry weight decompression module in the model
-        decompressor_name = f"weights_decompressor_{weight_node.node_name.replace('.', '_')}"
+            # registry weight decompression module in the model
+            decompressor_name = f"weights_decompressor_{weight_node.node_name.replace('.', '_')}"
 
-        # inserts the weight decompressor into the model as the post hook on the model weight
-        transformation_layout.register(
-            PTSharedFnInsertionCommand(
-                [PTTargetPoint(TargetType.OPERATOR_POST_HOOK, target_node_name=weight_node.node_name)],
-                decompressor,
-                decompressor_name,
+            # inserts the weight decompressor into the model as the post hook on the model weight
+            transformation_layout.register(
+                PTSharedFnInsertionCommand(
+                    [PTTargetPoint(TargetType.OPERATOR_POST_HOOK, target_node_name=weight_node.node_name)],
+                    decompressor,
+                    decompressor_name,
+                )
             )
-        )
 
     return PTModelTransformer(model).transform(transformation_layout)
