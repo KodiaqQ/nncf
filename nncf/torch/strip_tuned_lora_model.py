@@ -106,7 +106,7 @@ def strip_tuned_lora_model(model: NNCFNetwork) -> NNCFNetwork:
             consumer_nodes = graph.get_next_nodes(weight_node)
             if len(consumer_nodes) > 1:
                 for c_node in consumer_nodes:
-                    c_module = model.get_module_by_scope(Scope.from_str(c_node.layer_name))
+                    c_module = model.nncf.get_module_by_scope(Scope.from_str(c_node.layer_name))
                     for name, param in c_module.named_parameters(recurse=False, remove_duplicate=False):
                         if id(param) == id(w):
                             setattr(c_module, name, compressed_parameter)
@@ -180,7 +180,7 @@ def strip_tuned_lora_model(model: NNCFNetwork) -> NNCFNetwork:
             consumer_nodes = graph.get_next_nodes(weight_node)
             if len(consumer_nodes) > 1:
                 for c_node in consumer_nodes:
-                    c_module = model.get_module_by_scope(Scope.from_str(c_node.layer_name))
+                    c_module = model.nncf.get_module_by_scope(Scope.from_str(c_node.layer_name))
                     for name, param in c_module.named_parameters(recurse=False, remove_duplicate=False):
                         if id(param) == id(w):
                             setattr(c_module, name, compressed_parameter)
