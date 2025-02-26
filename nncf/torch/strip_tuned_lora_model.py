@@ -80,8 +80,6 @@ def strip_tuned_lora_model(model: NNCFNetwork) -> NNCFNetwork:
             q_output = torch.clip(q_output, quantizer_module.level_low, quantizer_module.level_high)
             q_output = q_output.to(integer_dtype)
 
-            print(f"output: {q_output.dtype}, scale: {scale.dtype}, zp :{zero_point.dtype}")
-
             if quantizer_module.num_bits == 8:
                 decompressor = INT8AsymmetricWeightsDecompressor(
                     scale=scale.data,
