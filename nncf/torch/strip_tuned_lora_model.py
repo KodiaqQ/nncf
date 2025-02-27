@@ -82,20 +82,20 @@ def strip_tuned_lora_model(model: NNCFNetwork) -> NNCFNetwork:
 
             if quantizer_module.num_bits == 8:
                 decompressor = INT8AsymmetricWeightsDecompressor(
-                    scale=scale.data,
-                    zero_point=zero_point.data,
+                    scale=scale,
+                    zero_point=zero_point,
                     result_dtype=original_dtype
                 )
             else:
                 decompressor = INT4AsymmetricWeightsDecompressor(
-                    scale=scale.data,
-                    zero_point=zero_point.data,
+                    scale=scale,
+                    zero_point=zero_point,
                     compressed_weight_shape=q_output.shape,
                     result_shape=original_shape,
                     result_dtype=original_dtype,
                 )
 
-            packed_tensor = decompressor.pack_weight(q_output.data)
+            packed_tensor = decompressor.pack_weight(q_output)
 
             # tmp = decompressor(packed_tensor)
 
