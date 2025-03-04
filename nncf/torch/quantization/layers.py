@@ -1393,7 +1393,7 @@ class INT8AsymmetricWeightsDecompressor(BaseWeightsDecompressor):
         :param result_dtype: (Optional) A data type that result should be cast to
         """
         super().__init__()
-        self.register_buffer("_scale", scale)
+        self.register_buffer("_scale", scale.type(torch.float16))
         self.register_buffer("_zero_point", self.pack_weight(zero_point))
         self.result_dtype = result_dtype
 
@@ -1427,7 +1427,7 @@ class INT8SymmetricWeightsDecompressor(BaseWeightsDecompressor):
         :param result_dtype: (Optional) A data type that result should be cast to
         """
         super().__init__()
-        self.register_buffer("_scale", scale)
+        self.register_buffer("_scale", scale.type(torch.float16))
         self.result_dtype = result_dtype
 
     @property
@@ -1463,7 +1463,7 @@ class INT4AsymmetricWeightsDecompressor(BaseWeightsDecompressor):
         :param result_dtype: (Optional) A data type that result should be cast to
         """
         super().__init__()
-        self.register_buffer("_scale", scale)
+        self.register_buffer("_scale", scale.type(torch.float16))
 
         self.zero_point_shape = zero_point.shape
         self.register_buffer("_zero_point", self.pack_weight(zero_point))
@@ -1510,7 +1510,7 @@ class INT4SymmetricWeightsDecompressor(BaseWeightsDecompressor):
         :param result_dtype: (Optional) A data type that result should be cast to
         """
         super().__init__()
-        self.register_buffer("_scale", scale)
+        self.register_buffer("_scale", scale.type(torch.float16))
 
         self.compressed_weight_shape = compressed_weight_shape
         self.result_shape = result_shape
