@@ -18,10 +18,6 @@ from nncf.torch.quantization.layers import SymmetricQuantizer
 from nncf.torch.quantization.layers import INT4AsymmetricWeightsDecompressor, INT8AsymmetricWeightsDecompressor
 from nncf.torch.quantization.layers import INT4SymmetricWeightsDecompressor, INT8SymmetricWeightsDecompressor
 from nncf.torch.quantization.quantize_functions import TuneRange
-from nncf.quantization.algorithms.weight_compression.weight_lowering import do_int_quantization
-from nncf.quantization.algorithms.weight_compression.config import WeightCompressionConfig
-from nncf.parameters import CompressWeightsMode
-from nncf.tensor import Tensor
 
 def strip_tuned_lora_model(model: NNCFNetwork) -> NNCFNetwork:
     layout = model.nncf.transformation_layout()
