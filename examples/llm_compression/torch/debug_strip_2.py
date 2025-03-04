@@ -32,23 +32,19 @@ class StripMode(Enum):
     TO_DECOMPRESS = "to_decompress"
     TO_OV = "to_ov"
 
-MODE = nncf.CompressWeightsMode.INT4_SYM
-BACKUP_MODE = nncf.BackupMode.INT8_SYM
-TORCH_DTYPE = torch.float32
+MODE = nncf.CompressWeightsMode.INT4_ASYM
+BACKUP_MODE = nncf.BackupMode.INT8_ASYM
 
-MODEL_ID = 'deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B'
+MODEL_ID = "microsoft/Phi-3.5-mini-instruct"
+# MODEL_ID = 'HuggingFaceTB/SmolLM-1.7B-Instruct'
+# MODEL_ID = 'deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B'
 GROUP_SIZE = 32
 NUM_EVAL_SAMPLES = 1
-MAIN_PATH = Path("/home/nmali/work/nncf_strip/examples/llm_compression/torch/")
-if NUM_EVAL_SAMPLES is None:
-    WWB_REF = MAIN_PATH.joinpath('ref_wwb_full.csv')
-else:
-    WWB_REF = MAIN_PATH.joinpath(f'ref_wwb_{NUM_EVAL_SAMPLES}.csv')
+MAIN_PATH = Path(__file__).parent.resolve()
+WWB_REF = MAIN_PATH.joinpath('phi_chat_wwb.csv')
+# WWB_REF = MAIN_PATH.joinpath('smollm_chat_wwb.csv')
+# WWB_REF = MAIN_PATH.joinpath('ref_wwb.csv')
 assert WWB_REF.exists()
-EXP_NAME = MAIN_PATH.joinpath(f'mode-{MODE.value}_backup-{BACKUP_MODE.value}_dtype-{TORCH_DTYPE}').as_posix()
-CKPT_PATH = Path(EXP_NAME + '.pth')
-OV_DIR = Path(EXP_NAME + '_export')
-OV_DIR.mkdir(exist_ok=True, parents=True)
 
 def save_checkpoint(wrapped_model, ckpt_path='nncf_checkpoint.pth'):
     nncf_state_dict = wrapped_model.nncf.state_dict()
@@ -72,7 +68,7 @@ def set_seed(seed):
     torch.backends.cudnn.deterministic = True
 
 def evaluate(tokenizer, model):
-    wwb_eval = TextEvaluator(tokenizer=tokenizer, gt_data=WWB_REF, test_data=str(WWB_REF), use_chat_template=True, num_samples=NUM_EVAL_SAMPLES, language='cn')
+    wwb_eval = TextEvaluator(tokenizer=tokenizer, gt_data=WWB_REF, test_data=str(WWB_REF), use_chat_template=True, num_samples=NUM_EVAL_SAMPLES)
     _, all_metrics = wwb_eval.score(model)
     similarity = float(all_metrics["similarity"].iloc[0])
     print("    DEBUG:")
@@ -81,12 +77,17 @@ def evaluate(tokenizer, model):
     print(f"     Similarity: {similarity}")
     return similarity
 
-def main(strip_mode, eval = True, use_cuda = True):
+def main(strip_mode, eval = True, use_cuda = True, torch_dtype = torch.float32):
     set_seed(42)
+    exp_name = MAIN_PATH.joinpath(f'phi_mode-{MODE.value}_backup-{BACKUP_MODE.value}_dtype-{torch_dtype}').as_posix()
+    # exp_name = MAIN_PATH.joinpath(f'smollm_mode-{MODE.value}_backup-{BACKUP_MODE.value}_dtype-{torch_dtype}').as_posix()
+    # exp_name = MAIN_PATH.joinpath(f'deep_mode-{MODE.value}_backup-{BACKUP_MODE.value}_dtype-{torch_dtype}').as_posix()
+    ckpt_path = Path(exp_name + '.pth')
+
     tokenizer = AutoTokenizer.from_pretrained(MODEL_ID, trust_remote_code=True)
     model = AutoModelForCausalLM.from_pretrained(
         MODEL_ID,
-        torch_dtype=TORCH_DTYPE,
+        torch_dtype=torch_dtype,
         trust_remote_code=True,
     )
 
@@ -104,8 +105,8 @@ def main(strip_mode, eval = True, use_cuda = True):
         position_ids = position_ids.cuda()
     dataset = [{"input_ids": input_ids, "attention_mask": attention_mask[:, :-1], "position_ids": position_ids[:, :-1]}]
 
-    if CKPT_PATH.exists():
-        nncf_ckpt = torch.load(CKPT_PATH)
+    if ckpt_path.exists():
+        nncf_ckpt = torch.load(ckpt_path)
         model = load_from_config(model, nncf_ckpt["nncf_config"], example_input=dataset[0])
         model.nncf.load_state_dict(nncf_ckpt["nncf_state_dict"])
         if use_cuda: model = model.cuda()
@@ -113,14 +114,14 @@ def main(strip_mode, eval = True, use_cuda = True):
         model = nncf.compress_weights(
             model,
             ratio=1,
-            group_size=-1,
+            group_size=GROUP_SIZE,
             mode=MODE,
-            backup_mode=None,
+            backup_mode=BACKUP_MODE,
             dataset=nncf.Dataset(dataset),
         )
-        save_checkpoint(model, CKPT_PATH)
+        save_checkpoint(model, ckpt_path)
 
-    result_path = MAIN_PATH.joinpath(f'mode-{MODE.value}_backup-{BACKUP_MODE.value}_dtype-{TORCH_DTYPE}_strip-{strip_mode.value}')
+    result_path = Path(exp_name + f"_strip-{strip_mode.value}")
     result_path.mkdir(exist_ok=True, parents=True)
     result_path_ckpt = result_path.joinpath("nncf_checkpoint.pth").as_posix()
 
@@ -141,14 +142,16 @@ def main(strip_mode, eval = True, use_cuda = True):
         elif strip_mode in [StripMode.TO_DECOMPRESS, StripMode.TO_OV]:
             model = strip_tuned_lora_model(model)
 
+            if strip_mode == StripMode.TO_DECOMPRESS:
+                save_checkpoint(model, result_path_ckpt)
+
             if strip_mode == StripMode.TO_OV:
+                ov_dir = Path(exp_name + '_export')
+                ov_dir.mkdir(exist_ok=True, parents=True)
                 model = model.cpu()
-                if TORCH_DTYPE == torch.bfloat16:
-                    export_from_model(model, OV_DIR, stateful=False, patch_16bit_model=True, compression_option="bf16")
-                else:
-                    export_from_model(model, OV_DIR, stateful=False)
+                export_from_model(model, ov_dir, stateful=False)
                 model = OVModelForCausalLM.from_pretrained(
-                    model_id=OV_DIR,
+                    model_id=ov_dir,
                     trust_remote_code=True,
                     load_in_8bit=False,
                     compile=True,
@@ -165,15 +168,16 @@ def main(strip_mode, eval = True, use_cuda = True):
 
 if __name__ == "__main__":
     results = {}
-    for strip_mode in [StripMode.TO_FLOAT, StripMode.TO_DECOMPRESS]:
-        similarity = main(strip_mode, eval=True, use_cuda=True)
-        results[strip_mode] = similarity
-    
-    print("FINAL:")
-    for strip_m, sim in results.items():
-        print(f" Strip: {strip_m.value}")
-        print(f" Samples: {NUM_EVAL_SAMPLES}")
-        print(f" Similarity: {sim}")
-    print(f"MODE: {MODE.value}")
-    print(f"BACKUP MODE: {BACKUP_MODE.value}")
-    print(f"TORCH DTYPE: {TORCH_DTYPE}")
+    for torch_dtype in [torch.float32]:
+        for strip_mode in [StripMode.TO_OV]:
+            similarity = main(strip_mode, eval=True, use_cuda=False, torch_dtype=torch_dtype)
+            results[strip_mode] = similarity
+
+        print("FINAL:")
+        for strip_m, sim in results.items():
+            print(f" Strip: {strip_m.value}")
+            print(f" Samples: {NUM_EVAL_SAMPLES}")
+            print(f" Similarity: {sim}")
+        print(f"MODE: {MODE.value}")
+        print(f"BACKUP MODE: {BACKUP_MODE.value}")
+        print(f"TORCH DTYPE: {torch_dtype}")
