@@ -945,3 +945,19 @@ def as_numpy_tensor(a: Tensor) -> Tensor:
     :return: Tensor in numpy backend.
     """
     return Tensor(as_numpy_tensor(a.data))
+
+
+@functools.singledispatch
+@tensor_guard
+def sign(a: Tensor) -> Tensor:
+    """
+    """
+    return Tensor(sign(a.data))
+
+
+@functools.singledispatch
+@tensor_guard
+def reciprocal(a: Tensor) -> Tensor:
+    """
+    """
+    return Tensor(reciprocal(a.data))

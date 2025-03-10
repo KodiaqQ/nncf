@@ -65,6 +65,8 @@ from nncf.tensor.functions.numeric import var as var
 from nncf.tensor.functions.numeric import where as where
 from nncf.tensor.functions.numeric import zeros as zeros
 from nncf.tensor.functions.numeric import zeros_like as zeros_like
+from nncf.tensor.functions.numeric import sign as sign
+from nncf.tensor.functions.numeric import reciprocal as reciprocal
 
 
 def _initialize_backends():
