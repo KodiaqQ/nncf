@@ -179,7 +179,7 @@ class QuantizeAsymmetricTorch(torch.autograd.Function):
         output = RQ.Quantize_forward(input_, input_low, input_range, levels)
 
         # Save tensors for backward pass
-        ctx.save_for_backward(input_, input_low, input_range)
+        ctx.save_for_backward(input_, output, input_low, input_range)
         ctx.level_low = level_low
         ctx.level_high = level_high
         ctx.levels = levels
@@ -189,15 +189,13 @@ class QuantizeAsymmetricTorch(torch.autograd.Function):
 
     @staticmethod
     def backward(ctx, grad_output):
-        input_, input_low, input_range = ctx.saved_tensors
-        levels = ctx.levels
+        input_, output, input_low, input_range = ctx.saved_tensors
         level_low = ctx.level_low
         level_high = ctx.level_high
         input_shape = input_.shape
         orig_shape = grad_output.shape
         grad_output = grad_output.reshape(input_shape)
 
-        output = RQ.Quantize_forward(input_, input_low, input_range, levels)
         grad_input, grad_low, grad_range = RQ.Quantize_backward(
             grad_output, input_, input_low, input_range, output, level_low, level_high
         )
