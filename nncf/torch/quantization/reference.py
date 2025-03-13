@@ -13,6 +13,9 @@ from typing import List, Tuple
 
 import torch
 
+import torch._dynamo
+torch._dynamo.config.suppress_errors = True
+
 def fp32_accum_wrapper(func):
     def wrapper(tensor_to_sum, ret_tensor):
         half = tensor_to_sum.dtype == torch.float16
@@ -38,6 +41,7 @@ def sum_like(tensor_to_sum, ref_tensor):
 
 
 class ReferenceQuantize:
+    @torch.compile
     def forward(
         self, input_: torch.Tensor, input_low: torch.Tensor, input_range: torch.Tensor, levels: int
     ) -> torch.Tensor:
@@ -51,6 +55,7 @@ class ReferenceQuantize:
         output = output / scale
         return output
 
+    @torch.compile
     def backward(
         self,
         grad_output: torch.Tensor,

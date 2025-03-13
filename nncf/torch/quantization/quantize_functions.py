@@ -10,6 +10,8 @@
 # limitations under the License.
 from typing import Any
 
+import torch.compiler
+
 import torch
 from torch.overrides import handle_torch_function
 from torch.overrides import has_torch_function_unary
