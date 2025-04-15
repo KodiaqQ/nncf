@@ -127,5 +127,12 @@ torch_backward = CompilationWrapper(torch_executor.backward)
 
 
 class ReferenceQuantizedFunctions:
-    Quantize_forward = torch_forward
-    Quantize_backward = torch_backward
+    _executor = ReferenceQuantize(backend_type=ReferenceBackendType.TORCH)
+    Quantize_forward = _executor.forward
+    Quantize_backward = _executor.backward
+
+
+class ReferenceQuantizedFunctionsCompile:
+    _executor = ReferenceQuantize(backend_type=ReferenceBackendType.TORCH)
+    Quantize_forward = torch.compile(_executor.forward)
+    Quantize_backward = torch.compile(_executor.backward)

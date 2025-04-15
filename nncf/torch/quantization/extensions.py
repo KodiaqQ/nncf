@@ -9,6 +9,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import os
 import os.path
 import subprocess
 
@@ -24,6 +25,7 @@ from nncf.torch.extensions import ExtensionLoaderTimeoutException
 from nncf.torch.extensions import ExtensionNamespace
 from nncf.torch.extensions import ExtensionsType
 from nncf.torch.quantization.reference import ReferenceQuantizedFunctions
+from nncf.torch.quantization.reference import ReferenceQuantizedFunctionsCompile
 
 BASE_EXT_DIR = os.path.join(NNCF_PACKAGE_ROOT_DIR, "torch/extensions/src/quantization")
 
@@ -83,7 +85,11 @@ class QuantizedFunctionsCUDALoader(ExtensionLoader):
 
     @classmethod
     def load(cls):
+        mode = os.environ.get("BENCHMARK_MODE", "REFERENCE")  # EXTENSION, COMPILE, REFERENCE
         try:
+            if mode != "EXTENSION":
+                nncf_logger.info("Controlled error")
+                raise NameError()
             return torch.utils.cpp_extension.load(
                 cls.name(),
                 CUDA_EXT_SRC_LIST,
@@ -102,6 +108,13 @@ class QuantizedFunctionsCUDALoader(ExtensionLoader):
                 "guidance) and that 'nvcc' is available on your system's PATH variable.\n"
             )
             raise nncf.InstallationError(msg) from e
+        except NameError:
+            if mode == "COMPILE":
+                nncf_logger.info("Using torch.compile")
+                return ReferenceQuantizedFunctionsCompile
+            elif mode == "REFERENCE":
+                nncf_logger.info("Using reference")
+                return ReferenceQuantizedFunctions
 
     @classmethod
     def name(cls) -> str:
