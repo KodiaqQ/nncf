@@ -42,6 +42,8 @@ LOW_BATCH_INPUT_SIZE = [2, 96, 64, 64]
 HIGH_BATCH_INPUT_SIZE = [128, 96, 64, 64]
 
 LM_HEAD_1B = [2048, 128256]
+LM_HEAD_3B = [3072, 128256]
+LM_HEAD_8B = [4096, 128256]
 
 
 class BatchMode(Enum):
@@ -85,7 +87,7 @@ TEST_DEVICES: list[torch.device] = [torch.device("cuda"), torch.device("cpu")]
 TEST_BATCHES: list[BatchDescriptor] = [
     BatchDescriptor(
         mode=BatchMode.HIGH,
-        input_size=LM_HEAD_1B,
+        input_size=LM_HEAD_8B,
         num_runs={torch.device("cuda"): GPU_RUNS_LOW_BATCH, torch.device("cpu"): CPU_RUNS},
     ),
 ]
