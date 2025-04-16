@@ -195,15 +195,17 @@ def triton_fwd(args):
     assert_size_stride(arg2_1, (2048, 1), (1, 1))
     with torch.cuda._DeviceGuard(0):
         torch.cuda.set_device(0)
+        stream0 = get_raw_stream(0)
+        # Topologically Sorted Source Nodes: [output, add, output_1, scale, output_2, neg, mul, zero_point, output_3, output_4, output_5], Original ATen: [aten.clamp, aten.add, aten.sub, aten.reciprocal, aten.mul, aten.neg, aten.round, aten.div]
         if arg1_1.dtype == torch.float32:
             buf0 = empty_strided_cuda((2048, 128256), (128256, 1), torch.float32)
+            triton_fp32.run(arg1_1, arg2_1, arg0_1, buf0, 262668288, grid=grid(262668288), stream=stream0)
         elif arg1_1.dtype == torch.float16:
             buf0 = empty_strided_cuda((2048, 128256), (128256, 1), torch.float16)
+            triton_fp16.run(arg1_1, arg2_1, arg0_1, buf0, 262668288, grid=grid(262668288), stream=stream0)
         elif arg1_1.dtype == torch.bfloat16:
             buf0 = empty_strided_cuda((2048, 128256), (128256, 1), torch.bfloat16)
-        # Topologically Sorted Source Nodes: [output, add, output_1, scale, output_2, neg, mul, zero_point, output_3, output_4, output_5], Original ATen: [aten.clamp, aten.add, aten.sub, aten.reciprocal, aten.mul, aten.neg, aten.round, aten.div]
-        stream0 = get_raw_stream(0)
-        triton_fp16.run(arg1_1, arg2_1, arg0_1, buf0, 262668288, grid=grid(262668288), stream=stream0)
+            triton_bf16.run(arg1_1, arg2_1, arg0_1, buf0, 262668288, grid=grid(262668288), stream=stream0)
         del arg0_1
         del arg1_1
         del arg2_1
