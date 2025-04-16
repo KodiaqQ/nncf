@@ -26,6 +26,7 @@ from nncf.torch.extensions import ExtensionNamespace
 from nncf.torch.extensions import ExtensionsType
 from nncf.torch.quantization.reference import ReferenceQuantizedFunctions
 from nncf.torch.quantization.reference import ReferenceQuantizedFunctionsCompile
+from nncf.torch.quantization.reference import ReferenceQuantizedFunctionsTriton
 
 BASE_EXT_DIR = os.path.join(NNCF_PACKAGE_ROOT_DIR, "torch/extensions/src/quantization")
 
@@ -115,6 +116,9 @@ class QuantizedFunctionsCUDALoader(ExtensionLoader):
             elif mode == "REFERENCE":
                 nncf_logger.info("Using reference")
                 return ReferenceQuantizedFunctions
+            elif mode == "TRITON":
+                nncf_logger.info("Using triton")
+                return ReferenceQuantizedFunctionsTriton
 
     @classmethod
     def name(cls) -> str:

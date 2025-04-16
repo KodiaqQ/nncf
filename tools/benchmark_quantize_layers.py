@@ -87,7 +87,7 @@ TEST_DEVICES: list[torch.device] = [torch.device("cuda"), torch.device("cpu")]
 TEST_BATCHES: list[BatchDescriptor] = [
     BatchDescriptor(
         mode=BatchMode.HIGH,
-        input_size=LM_HEAD_8B,
+        input_size=LM_HEAD_1B,
         num_runs={torch.device("cuda"): GPU_RUNS_LOW_BATCH, torch.device("cpu"): CPU_RUNS},
     ),
 ]

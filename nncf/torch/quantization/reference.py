@@ -17,6 +17,7 @@ import torch
 
 import nncf
 from nncf.torch.utils import CompilationWrapper
+from nncf.torch.quantization.triton_reference import triton_forward
 from nncf.torch.utils import sum_like
 
 GeneralizedTensor = TypeVar("GeneralizedTensor", torch.Tensor, np.ndarray)
@@ -135,4 +136,10 @@ class ReferenceQuantizedFunctions:
 class ReferenceQuantizedFunctionsCompile:
     _executor = ReferenceQuantize(backend_type=ReferenceBackendType.TORCH)
     Quantize_forward = torch.compile(_executor.forward)
+    Quantize_backward = torch.compile(_executor.backward)
+
+
+class ReferenceQuantizedFunctionsTriton:
+    _executor = ReferenceQuantize(backend_type=ReferenceBackendType.TORCH)
+    Quantize_forward = triton_forward
     Quantize_backward = torch.compile(_executor.backward)
