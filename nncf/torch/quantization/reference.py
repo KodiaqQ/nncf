@@ -10,7 +10,7 @@
 # limitations under the License.
 
 from enum import Enum
-from typing import TypeVar
+from typing import TypeVar, List
 
 import numpy as np
 import torch
@@ -74,9 +74,7 @@ class ReferenceQuantize:
         levels: int,
         level_low: int,
         level_high: int,
-        is_asymmetric: bool = False,
-    ) -> list[GeneralizedTensor]:
-        # is_asymmetric is unused, present only to correspond to the CPU signature of calling "backward"
+    ) -> List[GeneralizedTensor]:
         mask_hi = input_ > (input_low + input_range)
         mask_hi = self._astype(mask_hi, input_.dtype)
         mask_lo = input_ < input_low
