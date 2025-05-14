@@ -9,7 +9,7 @@ empty_strided_cpu = torch._C._dynamo.guards._empty_strided_cpu
 
 
 @triton.jit
-def fp32_forward_my(
+def custom_forward(
     input__ptr,
     input_low_ptr,
     input_range_ptr,
@@ -60,7 +60,7 @@ def fp32_forward_my(
 
 
 @triton.jit
-def fp32_backward_my(
+def custom_backward(
     grad_output_ptr,
     input__ptr,
     input_low_ptr,
@@ -180,7 +180,7 @@ def triton_forward(input_, input_low, input_range, levels):
 
     n_elements = input_.numel()
     grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
-    fp32_forward_my[grid](input_, input_low, input_range, levels, output, n_elements, BLOCK_SIZE=512)
+    custom_forward[grid](input_, input_low, input_range, levels, output, n_elements, BLOCK_SIZE=512)
 
     return output
 
@@ -210,7 +210,7 @@ def triton_backward(
 
     n_elements = input_.numel()
     grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
-    fp32_backward_my[grid](
+    custom_backward[grid](
         grad_output,
         input_,
         input_low,
