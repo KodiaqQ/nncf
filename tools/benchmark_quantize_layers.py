@@ -79,10 +79,10 @@ class GranularityType(Enum):
     PER_CHANNEL = "per_channel"
 
 
-TEST_TENSOR_TYPES: list[TensorType] = [TensorType.WEIGHTS, TensorType.ACTIVATIONS]
-TEST_GRANULARITY: list[GranularityType] = [GranularityType.PER_TENSOR, GranularityType.PER_CHANNEL]
+TEST_TENSOR_TYPES: list[TensorType] = [TensorType.WEIGHTS]
+TEST_GRANULARITY: list[GranularityType] = [GranularityType.PER_CHANNEL]
 TEST_SYMMETRIC: list[bool] = [True, False]
-TEST_DEVICES: list[torch.device] = [torch.device("cuda"), torch.device("cpu")]
+TEST_DEVICES: list[torch.device] = [torch.device("cuda")]
 
 TEST_BATCHES: list[BatchDescriptor] = [
     BatchDescriptor(
@@ -91,13 +91,13 @@ TEST_BATCHES: list[BatchDescriptor] = [
         num_runs={torch.device("cuda"): GPU_RUNS_LOW_BATCH, torch.device("cpu"): CPU_RUNS},
     ),
 ]
-TEST_DTYPES: list[torch.dtype] = [torch.float, torch.half]
+TEST_DTYPES: list[torch.dtype] = [torch.float32, torch.float16, torch.bfloat16]
 TEST_EXEC_TYPES: list[ExecutionType] = [
     ExecutionType.REGULAR,
 ]
-TEST_NARROW_RANGE: list[bool] = [False, True]
-TEST_TIMING_MODE: list[TimingMode] = [TimingMode.WALL, TimingMode.KERNEL]
-TEST_REFERENCE: list[bool] = [False, True]
+TEST_NARROW_RANGE: list[bool] = [False]
+TEST_TIMING_MODE: list[TimingMode] = [TimingMode.KERNEL]
+TEST_REFERENCE: list[bool] = [False]
 
 
 @dataclass
