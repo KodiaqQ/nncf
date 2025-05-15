@@ -4,8 +4,7 @@ import triton.language as tl
 from torch._inductor.runtime import triton_helpers
 from torch._inductor.runtime.triton_helpers import libdevice
 
-empty_strided_cuda = torch._C._dynamo.guards._empty_strided_cuda
-empty_strided_cpu = torch._C._dynamo.guards._empty_strided_cpu
+DEVICE = triton.runtime.driver.active.get_active_torch_device()
 
 
 @triton.jit
@@ -13,20 +12,20 @@ def custom_forward(
     input__ptr,
     input_low_ptr,
     input_range_ptr,
-    levels_ptr,
+    levels,
     output_ptr,
+    last_dim,
     n_elements,
     BLOCK_SIZE: tl.constexpr,
 ):
     block_start = tl.program_id(0) * BLOCK_SIZE
     offset = block_start + tl.arange(0, BLOCK_SIZE)[:]
     mask = tl.full([BLOCK_SIZE], True, tl.int1)
-    d_offset = offset // 128256
+    d_offset = offset // last_dim
 
     input_ = tl.load(input__ptr + offset, mask=mask).to(tl.float32)
     input_low = tl.load(input_low_ptr + d_offset, mask=mask, eviction_policy="evict_last").to(tl.float32)
     input_range = tl.load(input_range_ptr + d_offset, mask=mask, eviction_policy="evict_last").to(tl.float32)
-    levels = tl.load(levels_ptr + (0))
 
     # Clip operation
     output_clip_ = triton_helpers.maximum(input_, input_low)
@@ -65,27 +64,25 @@ def custom_backward(
     input__ptr,
     input_low_ptr,
     input_range_ptr,
-    levels_ptr,
-    level_low_ptr,
-    level_high_ptr,
+    levels,
+    level_low,
+    level_high,
     grad_input_ptr,
     grad_low_ptr,
     grad_range_ptr,
+    last_dim,
     n_elements,
     BLOCK_SIZE: tl.constexpr,
 ):
     block_start = tl.program_id(0) * BLOCK_SIZE
     offset = block_start + tl.arange(0, BLOCK_SIZE)[:]
     mask = tl.full([BLOCK_SIZE], True, tl.int1)
-    d_offset = offset // 128256
+    d_offset = offset // last_dim
 
     input_ = tl.load(input__ptr + offset, mask=mask).to(tl.float32)
     input_low = tl.load(input_low_ptr + d_offset, mask=mask, eviction_policy="evict_last").to(tl.float32)
     input_range = tl.load(input_range_ptr + d_offset, mask=mask, eviction_policy="evict_last").to(tl.float32)
     grad_output = tl.load(grad_output_ptr + (offset), mask=mask).to(tl.float32)
-    levels = tl.load(levels_ptr + (0))
-    level_low = tl.load(level_low_ptr + (0))
-    level_high = tl.load(level_high_ptr + (0))
 
     # Mask high calculation
     input_high = input_low + input_range
@@ -169,20 +166,25 @@ def custom_backward(
 
 
 def triton_forward(input_, input_low, input_range, levels):
-    dtype = input_.dtype
     shape = tuple(input_.shape)
-    device = input_.device
-    empty_call = empty_strided_cuda if device.type == "cuda" else empty_strided_cpu
+    last_dim = shape[-1]
 
-    levels = torch.tensor(levels, dtype=torch.float32).to(device)
+    orig_device = input_.device
 
-    output = empty_call(shape, (shape[-1], 1), dtype)
+    input_ = input_.to(DEVICE)
+    input_low = input_low.to(DEVICE)
+    input_range = input_range.to(DEVICE)
+
+    output = torch.empty_like(input_)
 
     n_elements = input_.numel()
     grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
-    custom_forward[grid](input_, input_low, input_range, levels, output, n_elements, BLOCK_SIZE=512)
 
-    return output
+    with torch.cuda._DeviceGuard(DEVICE.index):
+        torch.cuda.set_device(DEVICE.index)
+        custom_forward[grid](input_, input_low, input_range, levels, output, last_dim, n_elements, BLOCK_SIZE=512)
+
+    return output.to(orig_device)
 
 
 def triton_backward(
@@ -195,34 +197,39 @@ def triton_backward(
     level_high,
     is_asymmetric=False,
 ):
-    dtype = input_.dtype
     shape = tuple(input_.shape)
-    device = input_.device
-    empty_call = empty_strided_cuda if device.type == "cuda" else empty_strided_cpu
+    last_dim = shape[-1]
 
-    levels = torch.tensor(levels, dtype=torch.float32).to(device)
-    level_low = torch.tensor(level_low, dtype=torch.float32).to(device)
-    level_high = torch.tensor(level_high, dtype=torch.float32).to(device)
+    orig_device = input_.device
 
-    grad_input = empty_call(shape, (shape[-1], 1), dtype)
-    grad_low = empty_call((shape[0], 1), (1, 1), dtype)
-    grad_range = empty_call((shape[0], 1), (1, 1), dtype)
+    grad_output = grad_output.to(DEVICE)
+    input_ = input_.to(DEVICE)
+    input_low = input_low.to(DEVICE)
+    input_range = input_range.to(DEVICE)
+
+    grad_input = torch.empty_like(input_)
+    grad_low = torch.empty_like(input_low)
+    grad_range = torch.empty_like(input_range)
 
     n_elements = input_.numel()
     grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
-    custom_backward[grid](
-        grad_output,
-        input_,
-        input_low,
-        input_range,
-        levels,
-        level_low,
-        level_high,
-        grad_input,
-        grad_low,
-        grad_range,
-        n_elements,
-        BLOCK_SIZE=512,
-    )
 
-    return grad_input, grad_low, grad_range
+    with torch.cuda._DeviceGuard(DEVICE.index):
+        torch.cuda.set_device(DEVICE.index)
+        custom_backward[grid](
+            grad_output,
+            input_,
+            input_low,
+            input_range,
+            levels,
+            level_low,
+            level_high,
+            grad_input,
+            grad_low,
+            grad_range,
+            last_dim,
+            n_elements,
+            BLOCK_SIZE=512,
+        )
+
+    return grad_input.to(orig_device), grad_low.to(orig_device), grad_range.to(orig_device)

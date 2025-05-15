@@ -34,8 +34,8 @@ cuda_map = {
 }
 cuda_quantizer = cuda_map[mode]
 
-nncf_logger.info(f"Current mode is: {mode}")
-nncf_logger.info(f"Quantizer to: {cuda_quantizer}")
+nncf_logger.error(f"Current mode is: {mode}")
+nncf_logger.error(f"Quantizer to: {cuda_quantizer}")
 
 
 class QuantizeSymmetric(torch.autograd.Function):
@@ -144,7 +144,10 @@ class QuantizeSymmetricTorch(torch.autograd.Function):
         original_shape = input_.shape
         input_ = input_.reshape(input_shape)
 
-        output = RQ.Quantize_forward(input_, input_low, input_range, levels)
+        if input_.is_cuda:
+            output = cuda_quantizer.get("Quantize_forward")(input_, input_low, input_range, levels)
+        else:
+            output = RQ.Quantize_forward(input_, input_low, input_range, levels)
 
         ctx.save_for_backward(input_, input_low, input_range)
         ctx.level_low = level_low
@@ -165,9 +168,14 @@ class QuantizeSymmetricTorch(torch.autograd.Function):
         orig_shape = grad_output.shape
         grad_output = grad_output.reshape(input_shape)
 
-        grad_input, _, grad_scale = RQ.Quantize_backward(
-            grad_output, input_, input_low, input_range, levels, level_low, level_high
-        )
+        if input_.is_cuda:
+            grad_input, _, grad_scale = cuda_quantizer.get("Quantize_backward")(
+                grad_output, input_, input_low, input_range, levels, level_low, level_high
+            )
+        else:
+            grad_input, _, grad_scale = RQ.Quantize_backward(
+                grad_output, input_, input_low, input_range, levels, level_low, level_high
+            )
 
         grad_input = grad_input.reshape(orig_shape)
         grad_scale = grad_scale.float()
@@ -182,7 +190,10 @@ class QuantizeAsymmetricTorch(torch.autograd.Function):
         original_shape = input_.shape
         input_ = input_.reshape(input_shape)
 
-        output = RQ.Quantize_forward(input_, input_low, input_range, levels)
+        if input_.is_cuda:
+            output = cuda_quantizer.get("Quantize_forward")(input_, input_low, input_range, levels)
+        else:
+            output = RQ.Quantize_forward(input_, input_low, input_range, levels)
 
         # Save tensors for backward pass
         ctx.save_for_backward(input_, input_low, input_range)
@@ -203,9 +214,14 @@ class QuantizeAsymmetricTorch(torch.autograd.Function):
         orig_shape = grad_output.shape
         grad_output = grad_output.reshape(input_shape)
 
-        grad_input, grad_low, grad_range = RQ.Quantize_backward(
-            grad_output, input_, input_low, input_range, levels, level_low, level_high
-        )
+        if input_.is_cuda:
+            grad_input, grad_low, grad_range = cuda_quantizer.get("Quantize_backward")(
+                grad_output, input_, input_low, input_range, levels, level_low, level_high
+            )
+        else:
+            grad_input, _, grad_scale = RQ.Quantize_backward(
+                grad_output, input_, input_low, input_range, levels, level_low, level_high
+            )
 
         grad_input = grad_input.reshape(orig_shape)
         grad_low = grad_low.float()
