@@ -1,3 +1,14 @@
+# Copyright (c) 2025 Intel Corporation
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#      http://www.apache.org/licenses/LICENSE-2.0
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 import torch
 import triton
 import triton.language as tl
@@ -169,22 +180,14 @@ def triton_forward(input_, input_low, input_range, levels):
     shape = tuple(input_.shape)
     last_dim = shape[-1]
 
-    orig_device = input_.device
-
-    input_ = input_.to(DEVICE)
-    input_low = input_low.to(DEVICE)
-    input_range = input_range.to(DEVICE)
-
     output = torch.empty_like(input_)
 
     n_elements = input_.numel()
     grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
 
-    with torch.cuda._DeviceGuard(DEVICE.index):
-        torch.cuda.set_device(DEVICE.index)
-        custom_forward[grid](input_, input_low, input_range, levels, output, last_dim, n_elements, BLOCK_SIZE=512)
+    custom_forward[grid](input_, input_low, input_range, levels, output, last_dim, n_elements, BLOCK_SIZE=512)
 
-    return output.to(orig_device)
+    return output
 
 
 def triton_backward(
@@ -200,13 +203,6 @@ def triton_backward(
     shape = tuple(input_.shape)
     last_dim = shape[-1]
 
-    orig_device = input_.device
-
-    grad_output = grad_output.to(DEVICE)
-    input_ = input_.to(DEVICE)
-    input_low = input_low.to(DEVICE)
-    input_range = input_range.to(DEVICE)
-
     grad_input = torch.empty_like(input_)
     grad_low = torch.empty_like(input_low)
     grad_range = torch.empty_like(input_range)
@@ -214,22 +210,20 @@ def triton_backward(
     n_elements = input_.numel()
     grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
 
-    with torch.cuda._DeviceGuard(DEVICE.index):
-        torch.cuda.set_device(DEVICE.index)
-        custom_backward[grid](
-            grad_output,
-            input_,
-            input_low,
-            input_range,
-            levels,
-            level_low,
-            level_high,
-            grad_input,
-            grad_low,
-            grad_range,
-            last_dim,
-            n_elements,
-            BLOCK_SIZE=512,
-        )
+    custom_backward[grid](
+        grad_output,
+        input_,
+        input_low,
+        input_range,
+        levels,
+        level_low,
+        level_high,
+        grad_input,
+        grad_low,
+        grad_range,
+        last_dim,
+        n_elements,
+        BLOCK_SIZE=512,
+    )
 
-    return grad_input.to(orig_device), grad_low.to(orig_device), grad_range.to(orig_device)
+    return grad_input, grad_low, grad_range

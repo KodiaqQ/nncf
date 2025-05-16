@@ -219,7 +219,7 @@ class QuantizeAsymmetricTorch(torch.autograd.Function):
                 grad_output, input_, input_low, input_range, levels, level_low, level_high
             )
         else:
-            grad_input, _, grad_scale = RQ.Quantize_backward(
+            grad_input, _, grad_range = RQ.Quantize_backward(
                 grad_output, input_, input_low, input_range, levels, level_low, level_high
             )
 
