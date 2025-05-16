@@ -83,6 +83,7 @@ def create_eval_model(
     pretrained: str,
     torch_dtype: torch.dtype,
     ckpt_file: Path,
+    device,
 ) -> Generator[AutoModelForCausalLM, None, None]:
     """
     Context manager for creating an evaluation model with appropriate cleanup.
@@ -98,7 +99,7 @@ def create_eval_model(
     :yields: Model to use for evaluation, either the new loaded model or the given one.
     """
     if fast_eval:
-        eval_model = AutoModelForCausalLM.from_pretrained(pretrained, torch_dtype=torch_dtype, device_map="auto")
+        eval_model = AutoModelForCausalLM.from_pretrained(pretrained, torch_dtype=torch_dtype, device_map=device)
         eval_model = load_checkpoint(eval_model, ckpt_file)
         device = next(model.parameters()).device
         example_input = {k: v.to(device) for k, v in eval_model.dummy_inputs.items()}
@@ -356,7 +357,7 @@ def main(argv) -> float:
     pprint(vars(args))
     assert torch.cuda.is_available()
     transformers.set_seed(42)
-    device = "cuda"
+    device = "cuda:0"
     torch_dtype = torch.bfloat16
     compression_config = dict(
         mode=CompressWeightsMode.INT4_ASYM,
@@ -380,7 +381,7 @@ def main(argv) -> float:
     task_manager = TaskManager(include_path=str(Path(__file__).resolve().parent / "custom_eval_tasks"))
 
     # Load original model and tokenizer.
-    model = AutoModelForCausalLM.from_pretrained(args.pretrained, torch_dtype=torch_dtype, device_map="auto")
+    model = AutoModelForCausalLM.from_pretrained(args.pretrained, torch_dtype=torch_dtype, device_map=device)
     tokenizer = AutoTokenizer.from_pretrained(args.pretrained)
 
     # Prepare training data and pre-compute hiddens of teacher model for distillation loss.
@@ -401,7 +402,7 @@ def main(argv) -> float:
     param_to_train = set_trainable(model, lora_lr=args.lr, fq_lr=fq_lr)
     opt = torch.optim.AdamW(param_to_train, weight_decay=weight_decay)
 
-    with create_eval_model(model, args.fast_eval, args.pretrained, torch_dtype, ckpt_file) as eval_model:
+    with create_eval_model(model, args.fast_eval, args.pretrained, torch_dtype, ckpt_file, device) as eval_model:
         initial_perplexity = best_perplexity = measure_perplexity(
             eval_model, task_manager, args.eval_seqlen, args.limit
         )
@@ -454,7 +455,7 @@ def main(argv) -> float:
 
         # Keep the best checkpoint with the lowest perplexity.
         save_checkpoint(model, ckpt_file)
-        with create_eval_model(model, args.fast_eval, args.pretrained, torch_dtype, ckpt_file) as eval_model:
+        with create_eval_model(model, args.fast_eval, args.pretrained, torch_dtype, ckpt_file, device) as eval_model:
             perplexity = measure_perplexity(eval_model, task_manager, args.eval_seqlen, args.limit)
             tb.add_scalar("perplexity", perplexity, total_steps)
             print(f"[Epoch {epoch}], word perplexity on wikitext (validation) = {perplexity:.4f}")
