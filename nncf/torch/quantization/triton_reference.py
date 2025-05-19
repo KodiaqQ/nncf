@@ -15,7 +15,7 @@ import triton.language as tl
 from torch._inductor.runtime import triton_helpers
 from torch._inductor.runtime.triton_helpers import libdevice
 
-DEVICE = triton.runtime.driver.active.get_active_torch_device()
+DEFAULT_BLOCK_SIZE = 512
 
 
 @triton.jit
@@ -47,9 +47,9 @@ def custom_forward(
     output_sub_1 = output_clip - input_low
 
     # Scale calculation
-    ones = tl.full([1], 1, tl.int32)
-    scale_ = ones / input_range
-    scale = scale_ * levels
+    one = 1.0
+    scale_ = levels - one
+    scale = scale_ / input_range
 
     # Output scaling
     output_scale = output_sub_1 * scale
@@ -66,7 +66,7 @@ def custom_forward(
     output_ = libdevice.nearbyint(output_sub_2)
     output = output_ / scale
 
-    tl.store(output_ptr + offset, output, None)
+    tl.store(output_ptr + (offset), output, None)
 
 
 @triton.jit
@@ -90,19 +90,17 @@ def custom_backward(
     mask = tl.full([BLOCK_SIZE], True, tl.int1)
     d_offset = offset // last_dim
 
+    grad_output = tl.load(grad_output_ptr + offset, mask=mask).to(tl.float32)
     input_ = tl.load(input__ptr + offset, mask=mask).to(tl.float32)
     input_low = tl.load(input_low_ptr + d_offset, mask=mask, eviction_policy="evict_last").to(tl.float32)
     input_range = tl.load(input_range_ptr + d_offset, mask=mask, eviction_policy="evict_last").to(tl.float32)
-    grad_output = tl.load(grad_output_ptr + (offset), mask=mask).to(tl.float32)
 
     # Mask high calculation
     input_high = input_low + input_range
-    mask_hi_ = input_ > input_high
-    mask_hi = mask_hi_.to(tl.float32)
+    mask_hi = input_ > input_high
 
     # Mask low calculation
-    mask_lo_ = input_ < input_low
-    mask_lo = mask_lo_.to(tl.float32)
+    mask_lo = input_ < input_low
 
     # Mask in calculation
     mask_c = 1.0
@@ -118,9 +116,9 @@ def custom_backward(
     output_sub_1 = output_clip - input_low
 
     #   Scale calculation
-    ones = tl.full([1], 1, tl.int32)
-    scale_ = ones / input_range
-    scale = scale_ * levels
+    one = 1.0
+    scale_ = levels - one
+    scale = scale_ / input_range
 
     #   Output scaling
     output_scale = output_sub_1 * scale
@@ -151,7 +149,7 @@ def custom_backward(
 
     # Reciprocal calculation
     reciprocal_ = input_range * range_sign
-    reciprocal = ones / reciprocal_
+    reciprocal = one / reciprocal_
 
     err = err_ * reciprocal
 
@@ -185,7 +183,9 @@ def triton_forward(input_, input_low, input_range, levels):
     n_elements = input_.numel()
     grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
 
-    custom_forward[grid](input_, input_low, input_range, levels, output, last_dim, n_elements, BLOCK_SIZE=512)
+    custom_forward[grid](
+        input_, input_low, input_range, levels, output, last_dim, n_elements, BLOCK_SIZE=DEFAULT_BLOCK_SIZE
+    )
 
     return output
 
@@ -223,7 +223,7 @@ def triton_backward(
         grad_range,
         last_dim,
         n_elements,
-        BLOCK_SIZE=512,
+        BLOCK_SIZE=DEFAULT_BLOCK_SIZE,
     )
 
     return grad_input, grad_low, grad_range
