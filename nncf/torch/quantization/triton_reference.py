@@ -12,12 +12,18 @@
 import torch
 import triton
 import triton.language as tl
-from torch._inductor.runtime import triton_helpers
 from torch._inductor.runtime.triton_helpers import libdevice
 
-DEFAULT_BLOCK_SIZE = 512
 
-
+@triton.autotune(
+    configs=[
+        triton.Config(kwargs={"BLOCK_SIZE": 256}, num_warps=2),
+        triton.Config(kwargs={"BLOCK_SIZE": 512}, num_warps=2),
+        triton.Config(kwargs={"BLOCK_SIZE": 1024}, num_warps=2),
+        triton.Config(kwargs={"BLOCK_SIZE": 2048}, num_warps=2),
+    ],
+    key=["BLOCK_SIZE"],
+)
 @triton.jit
 def custom_forward(
     input__ptr,
@@ -39,9 +45,9 @@ def custom_forward(
     input_range = tl.load(input_range_ptr + d_offset, mask=mask, eviction_policy="evict_last").to(tl.float32)
 
     # Clip operation
-    output_clip_ = triton_helpers.maximum(input_, input_low)
+    output_clip_ = tl.maximum(input_, input_low)
     input_high = input_low + input_range
-    output_clip = triton_helpers.minimum(output_clip_, input_high)
+    output_clip = tl.minimum(output_clip_, input_high)
 
     # Input low from output subtraction
     output_sub_1 = output_clip - input_low
@@ -69,6 +75,15 @@ def custom_forward(
     tl.store(output_ptr + (offset), output, None)
 
 
+@triton.autotune(
+    configs=[
+        triton.Config(kwargs={"BLOCK_SIZE": 256}, num_warps=2),
+        triton.Config(kwargs={"BLOCK_SIZE": 512}, num_warps=2),
+        triton.Config(kwargs={"BLOCK_SIZE": 1024}, num_warps=2),
+        triton.Config(kwargs={"BLOCK_SIZE": 2048}, num_warps=2),
+    ],
+    key=["BLOCK_SIZE"],
+)
 @triton.jit
 def custom_backward(
     grad_output_ptr,
@@ -109,8 +124,8 @@ def custom_backward(
 
     # Output calculation
     #   Clip operation
-    output_clip_ = triton_helpers.maximum(input_, input_low)
-    output_clip = triton_helpers.minimum(output_clip_, input_high)
+    output_clip_ = tl.maximum(input_, input_low)
+    output_clip = tl.minimum(output_clip_, input_high)
 
     #   Input low from output subtraction
     output_sub_1 = output_clip - input_low
@@ -181,11 +196,11 @@ def triton_forward(input_, input_low, input_range, levels):
     output = torch.empty_like(input_)
 
     n_elements = input_.numel()
-    grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
 
-    custom_forward[grid](
-        input_, input_low, input_range, levels, output, last_dim, n_elements, BLOCK_SIZE=DEFAULT_BLOCK_SIZE
-    )
+    with torch.cuda.device(input_.device):
+        grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+
+        custom_forward[grid](input_, input_low, input_range, levels, output, last_dim, n_elements)
 
     return output
 
@@ -208,22 +223,23 @@ def triton_backward(
     grad_range = torch.empty_like(input_range)
 
     n_elements = input_.numel()
-    grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
 
-    custom_backward[grid](
-        grad_output,
-        input_,
-        input_low,
-        input_range,
-        levels,
-        level_low,
-        level_high,
-        grad_input,
-        grad_low,
-        grad_range,
-        last_dim,
-        n_elements,
-        BLOCK_SIZE=DEFAULT_BLOCK_SIZE,
-    )
+    with torch.cuda.device(input_.device):
+        grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+
+        custom_backward[grid](
+            grad_output,
+            input_,
+            input_low,
+            input_range,
+            levels,
+            level_low,
+            level_high,
+            grad_input,
+            grad_low,
+            grad_range,
+            last_dim,
+            n_elements,
+        )
 
     return grad_input, grad_low, grad_range

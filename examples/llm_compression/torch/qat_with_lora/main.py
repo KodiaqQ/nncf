@@ -357,7 +357,7 @@ def main(argv) -> float:
     pprint(vars(args))
     assert torch.cuda.is_available()
     transformers.set_seed(42)
-    device = "cuda:0"
+    device = "cuda"
     torch_dtype = torch.bfloat16
     compression_config = dict(
         mode=CompressWeightsMode.INT4_ASYM,
@@ -381,7 +381,7 @@ def main(argv) -> float:
     task_manager = TaskManager(include_path=str(Path(__file__).resolve().parent / "custom_eval_tasks"))
 
     # Load original model and tokenizer.
-    model = AutoModelForCausalLM.from_pretrained(args.pretrained, torch_dtype=torch_dtype, device_map=device)
+    model = AutoModelForCausalLM.from_pretrained(args.pretrained, torch_dtype=torch_dtype, device_map="auto")
     tokenizer = AutoTokenizer.from_pretrained(args.pretrained)
 
     # Prepare training data and pre-compute hiddens of teacher model for distillation loss.
