@@ -35,11 +35,12 @@ from tools.benchmark import run_worker
 
 TIME_SCALES = {"ms": 1000}
 NBITS = 8
-GPU_RUNS_LOW_BATCH = 1000
+GPU_RUNS_LOW_BATCH = 10000
 GPU_RUNS_HIGH_BATCH = 100
 CPU_RUNS = 100
 LOW_BATCH_INPUT_SIZE = [2, 96, 64, 64]
 HIGH_BATCH_INPUT_SIZE = [128, 96, 64, 64]
+GROUP_SIZE = 256
 
 LM_HEAD_1B = [2048, 128256]
 LM_HEAD_3B = [3072, 128256]
@@ -77,10 +78,15 @@ class TensorType(Enum):
 class GranularityType(Enum):
     PER_TENSOR = "per_tensor"
     PER_CHANNEL = "per_channel"
+    PER_GROUP = "per_group"
 
 
-TEST_TENSOR_TYPES: list[TensorType] = [TensorType.WEIGHTS]
-TEST_GRANULARITY: list[GranularityType] = [GranularityType.PER_CHANNEL]
+TEST_TENSOR_TYPES: list[TensorType] = [TensorType.WEIGHTS, TensorType.ACTIVATIONS]
+TEST_GRANULARITY: list[GranularityType] = [
+    GranularityType.PER_TENSOR,
+    GranularityType.PER_CHANNEL,
+    GranularityType.PER_GROUP,
+]
 TEST_SYMMETRIC: list[bool] = [True, False]
 TEST_DEVICES: list[torch.device] = [torch.device("cuda")]
 
@@ -177,6 +183,12 @@ def get_module(params_struct: ParamStruct) -> BaseQuantizer:
     ]
     if params_struct.granularity == GranularityType.PER_CHANNEL:
         scale_shape = get_per_channel_scale_shape(input_shape, is_weights=is_weights)
+    elif params_struct.granularity == GranularityType.PER_GROUP:
+        reduction_axis = 1
+        input_shape[reduction_axis : reduction_axis + 1] = (input_shape[reduction_axis] // GROUP_SIZE, GROUP_SIZE)
+
+        scale_shape = list(input_shape)
+        scale_shape[-1] = 1
     specs = DefaultedPTQuantizerSpec(scale_shape=scale_shape, narrow_range=params_struct.narrow_range, num_bits=NBITS)
 
     module_cls = SymmetricQuantizer if params_struct.symmetric else AsymmetricQuantizer

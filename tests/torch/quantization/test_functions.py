@@ -17,6 +17,7 @@ from torch.autograd import Variable
 from torch.distributions.uniform import Uniform
 
 from nncf.common.quantization.structs import QuantizationScheme as QuantizationMode
+from nncf.common.utils.os import is_windows
 from nncf.torch.quantization.extensions import QuantizedFunctionsCPU
 from nncf.torch.quantization.extensions import QuantizedFunctionsCUDA
 from nncf.torch.quantization.quantize_functions import asymmetric_quantize
@@ -672,6 +673,23 @@ def test_get_scale_zp_from_input_low_input_high(
     )
     assert zero_point == ref_zero_point, f"{zero_point} != {ref_zero_point}"
     assert np.isclose(scale, ref_scale), f"{scale:.10f} != {ref_scale}"
+
+
+def test_reference_quantize_compilation():
+    rqf = ReferenceQuantizedFunctions()
+
+    input_ = torch.tensor([[-0.5, 0.5]])
+    input_low = torch.tensor([-0.5])
+    input_range = torch.tensor([1.0])
+    grad_output = torch.tensor([[-0.5, 0.5]])
+
+    compilation_ref = not is_windows()
+
+    output = rqf.Quantize_forward(input_, input_low, input_range, 256)
+    assert rqf.Quantize_forward.is_compilation_successful == compilation_ref
+
+    rqf.Quantize_backward(grad_output, input_, input_low, input_range, output, -128, 127)
+    assert rqf.Quantize_backward.is_compilation_successful == compilation_ref
 
 
 class CompatibilityTestDesc:
