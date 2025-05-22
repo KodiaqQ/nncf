@@ -22,9 +22,12 @@ import torch.multiprocessing as mp
 from tqdm import tqdm
 
 from nncf.common.quantization.structs import QuantizationScheme as QuantizationMode
+from nncf.torch.quantization.layers import AsymmetricLoraQuantizer
 from nncf.torch.quantization.layers import AsymmetricQuantizer
 from nncf.torch.quantization.layers import BaseQuantizer
+from nncf.torch.quantization.layers import PTLoraSpec
 from nncf.torch.quantization.layers import PTQuantizerSpec
+from nncf.torch.quantization.layers import SymmetricLoraQuantizer
 from nncf.torch.quantization.layers import SymmetricQuantizer
 from nncf.torch.quantization.layers import get_per_channel_scale_shape
 from nncf.torch.quantization.reference import ReferenceBackendType
@@ -34,17 +37,15 @@ from tools.benchmark import run_wall
 from tools.benchmark import run_worker
 
 TIME_SCALES = {"ms": 1000}
-NBITS = 8
-GPU_RUNS_LOW_BATCH = 10000
+NBITS = 4
+GPU_RUNS_LOW_BATCH = 1000
 GPU_RUNS_HIGH_BATCH = 100
 CPU_RUNS = 100
-LOW_BATCH_INPUT_SIZE = [2, 96, 64, 64]
-HIGH_BATCH_INPUT_SIZE = [128, 96, 64, 64]
+LOW_BATCH_INPUT_SIZE = [2048, 128256]
+HIGH_BATCH_INPUT_SIZE = [4096, 128256]
 GROUP_SIZE = 256
-
-LM_HEAD_1B = [2048, 128256]
-LM_HEAD_3B = [3072, 128256]
-LM_HEAD_8B = [4096, 128256]
+CHANNELS_AXIS = 1
+SIGNED = True
 
 
 class BatchMode(Enum):
@@ -82,27 +83,29 @@ class GranularityType(Enum):
 
 
 TEST_TENSOR_TYPES: list[TensorType] = [TensorType.WEIGHTS, TensorType.ACTIVATIONS]
-TEST_GRANULARITY: list[GranularityType] = [
-    GranularityType.PER_TENSOR,
-    GranularityType.PER_CHANNEL,
-    GranularityType.PER_GROUP,
-]
+TEST_GRANULARITY: list[GranularityType] = [GranularityType.PER_GROUP]
 TEST_SYMMETRIC: list[bool] = [True, False]
 TEST_DEVICES: list[torch.device] = [torch.device("cuda")]
 
 TEST_BATCHES: list[BatchDescriptor] = [
     BatchDescriptor(
-        mode=BatchMode.HIGH,
-        input_size=LM_HEAD_1B,
+        mode=BatchMode.LOW,
+        input_size=LOW_BATCH_INPUT_SIZE,
         num_runs={torch.device("cuda"): GPU_RUNS_LOW_BATCH, torch.device("cpu"): CPU_RUNS},
     ),
+    # BatchDescriptor(
+    #     mode=BatchMode.HIGH,
+    #     input_size=HIGH_BATCH_INPUT_SIZE,
+    #     num_runs={torch.device("cuda"): GPU_RUNS_HIGH_BATCH, torch.device("cpu"): CPU_RUNS},
+    # ),
 ]
-TEST_DTYPES: list[torch.dtype] = [torch.float32, torch.float16, torch.bfloat16]
+TEST_DTYPES: list[torch.dtype] = [torch.float32, torch.bfloat16]
 TEST_EXEC_TYPES: list[ExecutionType] = [
     ExecutionType.REGULAR,
+    ExecutionType.DATA_PARALLEL,
 ]
-TEST_NARROW_RANGE: list[bool] = [False]
-TEST_TIMING_MODE: list[TimingMode] = [TimingMode.KERNEL]
+TEST_NARROW_RANGE: list[bool] = [False, True]
+TEST_TIMING_MODE: list[TimingMode] = [TimingMode.WALL, TimingMode.KERNEL]
 TEST_REFERENCE: list[bool] = [False]
 
 
@@ -171,6 +174,16 @@ class DefaultedPTQuantizerSpec(PTQuantizerSpec):
         super().__init__(num_bits, mode, signedness_to_force, narrow_range, half_range, scale_shape, logarithm_scale)
 
 
+class DefaultPTLoraSpec(PTLoraSpec):
+    def __init__(
+        self,
+        lora_rank: int = 4,
+        orig_weight_shape: list[int] = None,
+        weight_shape: list[int] = None,
+    ):
+        super().__init__(lora_rank, orig_weight_shape, weight_shape)
+
+
 RQ = ReferenceQuantize(backend_type=ReferenceBackendType.TORCH)
 
 
@@ -178,21 +191,31 @@ def get_module(params_struct: ParamStruct) -> BaseQuantizer:
     input_shape = params_struct.batch.input_size
     is_weights = params_struct.tensor_type == TensorType.WEIGHTS
 
-    scale_shape = [
-        1,
-    ]
-    if params_struct.granularity == GranularityType.PER_CHANNEL:
-        scale_shape = get_per_channel_scale_shape(input_shape, is_weights=is_weights)
-    elif params_struct.granularity == GranularityType.PER_GROUP:
-        reduction_axis = 1
-        input_shape[reduction_axis : reduction_axis + 1] = (input_shape[reduction_axis] // GROUP_SIZE, GROUP_SIZE)
+    specs = {}
 
-        scale_shape = list(input_shape)
-        scale_shape[-1] = 1
-    specs = DefaultedPTQuantizerSpec(scale_shape=scale_shape, narrow_range=params_struct.narrow_range, num_bits=NBITS)
+    if params_struct.granularity == GranularityType.PER_GROUP:
+        weight_shape = list(input_shape)
+        num_groups = weight_shape[CHANNELS_AXIS] // GROUP_SIZE
+        weight_shape[CHANNELS_AXIS : CHANNELS_AXIS + 1] = (num_groups, GROUP_SIZE)
 
-    module_cls = SymmetricQuantizer if params_struct.symmetric else AsymmetricQuantizer
-    m = module_cls(specs)
+        scale_shape = list(weight_shape)
+        scale_shape[CHANNELS_AXIS + 1] = 1
+
+        specs["lspec"] = DefaultPTLoraSpec(orig_weight_shape=input_shape, weight_shape=weight_shape)
+        module_cls = SymmetricLoraQuantizer if params_struct.symmetric else AsymmetricLoraQuantizer
+    else:
+        scale_shape = [
+            1,
+        ]
+        if params_struct.granularity == GranularityType.PER_CHANNEL:
+            scale_shape = get_per_channel_scale_shape(input_shape, is_weights=is_weights)
+        module_cls = SymmetricQuantizer if params_struct.symmetric else AsymmetricQuantizer
+
+    specs["qspec"] = DefaultedPTQuantizerSpec(
+        scale_shape=scale_shape, narrow_range=params_struct.narrow_range, num_bits=NBITS, signedness_to_force=SIGNED
+    )
+
+    m = module_cls(**specs)
     m = m.to(params_struct.device)
     if params_struct.dtype == torch.half:
         m.half()
@@ -229,7 +252,8 @@ if __name__ == "__main__":
                 run_data = {"time": -1}
         else:
             run_data = call_fn(module, input_size, param_struct.device, num_runs, dtype=param_struct.dtype)
-            max_memory = torch.cuda.max_memory_allocated() / 1024 / 1024 / 1024
+
+        max_memory = torch.cuda.max_memory_allocated() / 1024 / 1024 / 1024
 
         b_data = {**param_struct.to_dict()}
         if param_struct.timing_mode == TimingMode.WALL:
@@ -246,8 +270,7 @@ if __name__ == "__main__":
         df = pd.DataFrame(benchmark_data)
 
         torch.cuda.reset_peak_memory_stats()
+        torch.cuda.empty_cache()
 
         df.to_csv(file_name, index=False)
     print("Done!")
-
-# To run: BENCHMARK_MODE=EXTENSION/COMPILE/REFERENCE python benchmark_quantize_layers.py
