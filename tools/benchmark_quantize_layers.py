@@ -83,7 +83,11 @@ class GranularityType(Enum):
 
 
 TEST_TENSOR_TYPES: list[TensorType] = [TensorType.WEIGHTS, TensorType.ACTIVATIONS]
-TEST_GRANULARITY: list[GranularityType] = [GranularityType.PER_GROUP]
+TEST_GRANULARITY: list[GranularityType] = [
+    GranularityType.PER_TENSOR,
+    GranularityType.PER_CHANNEL,
+    GranularityType.PER_GROUP,
+]
 TEST_SYMMETRIC: list[bool] = [True, False]
 TEST_DEVICES: list[torch.device] = [torch.device("cuda")]
 

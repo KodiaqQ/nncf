@@ -32,6 +32,7 @@ def custom_forward(
     levels,
     output_ptr,
     last_dim,
+    is_per_tensor,
     n_elements,
     BLOCK_SIZE: tl.constexpr,
 ):
@@ -39,6 +40,9 @@ def custom_forward(
     offset = block_start + tl.arange(0, BLOCK_SIZE)[:]
     mask = tl.full([BLOCK_SIZE], True, tl.int1)
     d_offset = offset // last_dim
+
+    if is_per_tensor:
+        d_offset -= d_offset
 
     input_ = tl.load(input__ptr + offset, mask=mask).to(tl.float32)
     input_low = tl.load(input_low_ptr + d_offset, mask=mask, eviction_policy="evict_last").to(tl.float32)
@@ -97,6 +101,7 @@ def custom_backward(
     grad_low_ptr,
     grad_range_ptr,
     last_dim,
+    is_per_tensor,
     n_elements,
     BLOCK_SIZE: tl.constexpr,
 ):
@@ -104,6 +109,8 @@ def custom_backward(
     offset = block_start + tl.arange(0, BLOCK_SIZE)[:]
     mask = tl.full([BLOCK_SIZE], True, tl.int1)
     d_offset = offset // last_dim
+    if is_per_tensor:
+        d_offset -= d_offset
 
     grad_output = tl.load(grad_output_ptr + offset, mask=mask).to(tl.float32)
     input_ = tl.load(input__ptr + offset, mask=mask).to(tl.float32)
@@ -196,11 +203,12 @@ def triton_forward(input_, input_low, input_range, levels):
     output = torch.empty_like(input_)
 
     n_elements = input_.numel()
+    is_per_tensor = input_low.numel() == 1
 
     with torch.cuda.device(input_.device):
         grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
 
-        custom_forward[grid](input_, input_low, input_range, levels, output, last_dim, n_elements)
+        custom_forward[grid](input_, input_low, input_range, levels, output, last_dim, is_per_tensor, n_elements)
 
     return output
 
@@ -223,6 +231,7 @@ def triton_backward(
     grad_range = torch.empty_like(input_range)
 
     n_elements = input_.numel()
+    is_per_tensor = input_low.numel() == 1
 
     with torch.cuda.device(input_.device):
         grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
@@ -239,6 +248,7 @@ def triton_backward(
             grad_low,
             grad_range,
             last_dim,
+            is_per_tensor,
             n_elements,
         )
 

@@ -28,6 +28,7 @@ def warmup(layer, input_, runs, forward_only=False):
 
 def run_wall(layer, input_size_, device, runs, is_print=True, dtype=torch.float) -> dict[str, float]:
     input_ = torch.randn(input_size_, device=torch.device(device), dtype=dtype)
+    input_.requires_grad = True
 
     # Force CUDA initialization & warm up
     warmup(layer, input_, 100)
@@ -51,6 +52,7 @@ def run_wall(layer, input_size_, device, runs, is_print=True, dtype=torch.float)
 
 def run_profile(layer, input_size_, device, runs, forward_only=False, dtype=torch.float) -> dict[str, float]:
     input_ = torch.randn(input_size_, device=torch.device(device), dtype=dtype)
+    input_.requires_grad = True
 
     # Force CUDA initialization & warm up
     warmup(layer, input_, 100, forward_only)
