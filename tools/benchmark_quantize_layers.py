@@ -106,7 +106,6 @@ TEST_BATCHES: list[BatchDescriptor] = [
 TEST_DTYPES: list[torch.dtype] = [torch.float32, torch.bfloat16]
 TEST_EXEC_TYPES: list[ExecutionType] = [
     ExecutionType.REGULAR,
-    ExecutionType.DATA_PARALLEL,
 ]
 TEST_NARROW_RANGE: list[bool] = [False, True]
 TEST_TIMING_MODE: list[TimingMode] = [TimingMode.WALL, TimingMode.KERNEL]
@@ -159,7 +158,7 @@ TEST_PARAM_STRUCTS: list[ParamStruct] = [
         TEST_GRANULARITY,
         TEST_SYMMETRIC,
     )
-    if not (device == torch.device("cpu") and dtype == torch.half)
+    if not (device == torch.device("cpu") and dtype == torch.float16)
     and not (device == torch.device("cpu") and exec_type == ExecutionType.DISTRIBUTED_DATA_PARALLEL)
 ]
 
@@ -221,7 +220,7 @@ def get_module(params_struct: ParamStruct) -> BaseQuantizer:
 
     m = module_cls(**specs)
     m = m.to(params_struct.device)
-    if params_struct.dtype == torch.half:
+    if params_struct.dtype == torch.float16:
         m.half()
 
     return m
@@ -274,7 +273,6 @@ if __name__ == "__main__":
         df = pd.DataFrame(benchmark_data)
 
         torch.cuda.reset_peak_memory_stats()
-        torch.cuda.empty_cache()
 
         df.to_csv(file_name, index=False)
     print("Done!")
