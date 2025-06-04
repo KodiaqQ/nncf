@@ -126,12 +126,6 @@ torch_forward = CompilationWrapper(torch_executor.forward)
 torch_backward = CompilationWrapper(torch_executor.backward)
 
 
-class ReferenceGetter:
-    @classmethod
-    def get(cls, value):
-        return getattr(cls, value)
-
-
-class ReferenceQuantizedFunctions(ReferenceGetter):
+class ReferenceQuantizedFunctions:
     Quantize_forward = torch_forward
     Quantize_backward = torch_backward
