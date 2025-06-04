@@ -61,7 +61,6 @@ bwassigner
 caffenet
 camvid
 cdist
-cdiv
 cellgate
 cfgfile
 charlaix
@@ -221,7 +220,6 @@ layerwise
 lazarevich
 legr
 levelname
-libdevice
 libname
 linalg
 logicaland
@@ -285,7 +283,6 @@ ndarray
 ndhwc
 ndims
 ndindex
-nearbyint
 nesterov
 netron
 nhwc

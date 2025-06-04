@@ -16,6 +16,8 @@ import numpy as np
 import torch
 
 import nncf
+from nncf.torch.quantization.triton_reference import triton_backward
+from nncf.torch.quantization.triton_reference import triton_forward
 from nncf.torch.utils import CompilationWrapper
 from nncf.torch.utils import sum_like
 
@@ -132,6 +134,17 @@ class ReferenceGetter:
         return getattr(cls, value)
 
 
+class ReferenceQuantizedFunctionsNotCompile(ReferenceGetter):
+    _executor = ReferenceQuantize(backend_type=ReferenceBackendType.TORCH)
+    Quantize_forward = _executor.forward
+    Quantize_backward = _executor.backward
+
+
 class ReferenceQuantizedFunctions(ReferenceGetter):
     Quantize_forward = torch_forward
     Quantize_backward = torch_backward
+
+
+class ReferenceQuantizedFunctionsTriton(ReferenceGetter):
+    Quantize_forward = triton_forward
+    Quantize_backward = triton_backward
