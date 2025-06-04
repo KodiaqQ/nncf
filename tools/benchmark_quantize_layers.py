@@ -84,8 +84,8 @@ class GranularityType(Enum):
 
 TEST_TENSOR_TYPES: list[TensorType] = [TensorType.WEIGHTS, TensorType.ACTIVATIONS]
 TEST_GRANULARITY: list[GranularityType] = [
-    GranularityType.PER_TENSOR,
-    GranularityType.PER_CHANNEL,
+    # GranularityType.PER_TENSOR,
+    # GranularityType.PER_CHANNEL,
     GranularityType.PER_GROUP,
 ]
 TEST_SYMMETRIC: list[bool] = [True, False]
@@ -97,11 +97,11 @@ TEST_BATCHES: list[BatchDescriptor] = [
         input_size=LOW_BATCH_INPUT_SIZE,
         num_runs={torch.device("cuda"): GPU_RUNS_LOW_BATCH, torch.device("cpu"): CPU_RUNS},
     ),
-    BatchDescriptor(
-        mode=BatchMode.HIGH,
-        input_size=HIGH_BATCH_INPUT_SIZE,
-        num_runs={torch.device("cuda"): GPU_RUNS_HIGH_BATCH, torch.device("cpu"): CPU_RUNS},
-    ),
+    # BatchDescriptor(
+    #     mode=BatchMode.HIGH,
+    #     input_size=HIGH_BATCH_INPUT_SIZE,
+    #     num_runs={torch.device("cuda"): GPU_RUNS_HIGH_BATCH, torch.device("cpu"): CPU_RUNS},
+    # ),
 ]
 TEST_DTYPES: list[torch.dtype] = [torch.float32, torch.bfloat16]
 TEST_EXEC_TYPES: list[ExecutionType] = [
