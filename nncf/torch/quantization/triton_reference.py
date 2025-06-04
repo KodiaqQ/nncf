@@ -33,7 +33,6 @@ def custom_forward(
     output_ptr,
     last_dim,
     is_per_tensor,
-    n_elements,
     BLOCK_SIZE: tl.constexpr,
 ):
     block_start = tl.program_id(0) * BLOCK_SIZE
@@ -102,7 +101,6 @@ def custom_backward(
     grad_range_ptr,
     last_dim,
     is_per_tensor,
-    n_elements,
     BLOCK_SIZE: tl.constexpr,
 ):
     block_start = tl.program_id(0) * BLOCK_SIZE
@@ -208,7 +206,7 @@ def triton_forward(input_, input_low, input_range, levels):
     with torch.cuda.device(input_.device):
         grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
 
-        custom_forward[grid](input_, input_low, input_range, levels, output, last_dim, is_per_tensor, n_elements)
+        custom_forward[grid](input_, input_low, input_range, levels, output, last_dim, is_per_tensor)
 
     return output
 
@@ -249,7 +247,6 @@ def triton_backward(
             grad_range,
             last_dim,
             is_per_tensor,
-            n_elements,
         )
 
     return grad_input, grad_low, grad_range
