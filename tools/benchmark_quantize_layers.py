@@ -22,12 +22,9 @@ import torch.multiprocessing as mp
 from tqdm import tqdm
 
 from nncf.common.quantization.structs import QuantizationScheme as QuantizationMode
-from nncf.torch.quantization.layers import AsymmetricLoraQuantizer
 from nncf.torch.quantization.layers import AsymmetricQuantizer
 from nncf.torch.quantization.layers import BaseQuantizer
-from nncf.torch.quantization.layers import PTLoraSpec
 from nncf.torch.quantization.layers import PTQuantizerSpec
-from nncf.torch.quantization.layers import SymmetricLoraQuantizer
 from nncf.torch.quantization.layers import SymmetricQuantizer
 from nncf.torch.quantization.layers import get_per_channel_scale_shape
 from nncf.torch.quantization.reference import ReferenceBackendType
@@ -41,11 +38,8 @@ NBITS = 8
 GPU_RUNS_LOW_BATCH = 10000
 GPU_RUNS_HIGH_BATCH = 100
 CPU_RUNS = 100
-LOW_BATCH_INPUT_SIZE = [2048, 128256]
-HIGH_BATCH_INPUT_SIZE = [4096, 128256]
-GROUP_SIZE = 256
-CHANNELS_AXIS = 1
-SIGNED = True
+LOW_BATCH_INPUT_SIZE = [2, 96, 64, 64]
+HIGH_BATCH_INPUT_SIZE = [128, 96, 64, 64]
 
 
 class BatchMode(Enum):
@@ -79,15 +73,10 @@ class TensorType(Enum):
 class GranularityType(Enum):
     PER_TENSOR = "per_tensor"
     PER_CHANNEL = "per_channel"
-    PER_GROUP = "per_group"
 
 
 TEST_TENSOR_TYPES: list[TensorType] = [TensorType.WEIGHTS, TensorType.ACTIVATIONS]
-TEST_GRANULARITY: list[GranularityType] = [
-    GranularityType.PER_TENSOR,
-    GranularityType.PER_CHANNEL,
-    GranularityType.PER_GROUP,
-]
+TEST_GRANULARITY: list[GranularityType] = [GranularityType.PER_TENSOR, GranularityType.PER_CHANNEL]
 TEST_SYMMETRIC: list[bool] = [True, False]
 TEST_DEVICES: list[torch.device] = [torch.device("cuda"), torch.device("cpu")]
 
@@ -103,9 +92,11 @@ TEST_BATCHES: list[BatchDescriptor] = [
         num_runs={torch.device("cuda"): GPU_RUNS_HIGH_BATCH, torch.device("cpu"): CPU_RUNS},
     ),
 ]
-TEST_DTYPES: list[torch.dtype] = [torch.float32, torch.bfloat16]
+TEST_DTYPES: list[torch.dtype] = [torch.float, torch.half]
 TEST_EXEC_TYPES: list[ExecutionType] = [
     ExecutionType.REGULAR,
+    ExecutionType.DISTRIBUTED_DATA_PARALLEL,
+    ExecutionType.DATA_PARALLEL,
 ]
 TEST_NARROW_RANGE: list[bool] = [False, True]
 TEST_TIMING_MODE: list[TimingMode] = [TimingMode.WALL, TimingMode.KERNEL]
@@ -158,7 +149,7 @@ TEST_PARAM_STRUCTS: list[ParamStruct] = [
         TEST_GRANULARITY,
         TEST_SYMMETRIC,
     )
-    if not (device == torch.device("cpu") and dtype == torch.float16)
+    if not (device == torch.device("cpu") and dtype == torch.half)
     and not (device == torch.device("cpu") and exec_type == ExecutionType.DISTRIBUTED_DATA_PARALLEL)
 ]
 
@@ -177,16 +168,6 @@ class DefaultedPTQuantizerSpec(PTQuantizerSpec):
         super().__init__(num_bits, mode, signedness_to_force, narrow_range, half_range, scale_shape, logarithm_scale)
 
 
-class DefaultPTLoraSpec(PTLoraSpec):
-    def __init__(
-        self,
-        lora_rank: int = 4,
-        orig_weight_shape: list[int] = None,
-        weight_shape: list[int] = None,
-    ):
-        super().__init__(lora_rank, orig_weight_shape, weight_shape)
-
-
 RQ = ReferenceQuantize(backend_type=ReferenceBackendType.TORCH)
 
 
@@ -194,33 +175,17 @@ def get_module(params_struct: ParamStruct) -> BaseQuantizer:
     input_shape = params_struct.batch.input_size
     is_weights = params_struct.tensor_type == TensorType.WEIGHTS
 
-    specs = {}
+    scale_shape = [
+        1,
+    ]
+    if params_struct.granularity == GranularityType.PER_CHANNEL:
+        scale_shape = get_per_channel_scale_shape(input_shape, is_weights=is_weights)
+    specs = DefaultedPTQuantizerSpec(scale_shape=scale_shape, narrow_range=params_struct.narrow_range, num_bits=NBITS)
 
-    if params_struct.granularity == GranularityType.PER_GROUP:
-        weight_shape = list(input_shape)
-        num_groups = weight_shape[CHANNELS_AXIS] // GROUP_SIZE
-        weight_shape[CHANNELS_AXIS : CHANNELS_AXIS + 1] = (num_groups, GROUP_SIZE)
-
-        scale_shape = list(weight_shape)
-        scale_shape[CHANNELS_AXIS + 1] = 1
-
-        specs["lspec"] = DefaultPTLoraSpec(orig_weight_shape=input_shape, weight_shape=weight_shape)
-        module_cls = SymmetricLoraQuantizer if params_struct.symmetric else AsymmetricLoraQuantizer
-    else:
-        scale_shape = [
-            1,
-        ]
-        if params_struct.granularity == GranularityType.PER_CHANNEL:
-            scale_shape = get_per_channel_scale_shape(input_shape, is_weights=is_weights)
-        module_cls = SymmetricQuantizer if params_struct.symmetric else AsymmetricQuantizer
-
-    specs["qspec"] = DefaultedPTQuantizerSpec(
-        scale_shape=scale_shape, narrow_range=params_struct.narrow_range, num_bits=NBITS, signedness_to_force=SIGNED
-    )
-
-    m = module_cls(**specs)
+    module_cls = SymmetricQuantizer if params_struct.symmetric else AsymmetricQuantizer
+    m = module_cls(specs)
     m = m.to(params_struct.device)
-    if params_struct.dtype == torch.float16:
+    if params_struct.dtype == torch.half:
         m.half()
 
     return m
@@ -256,23 +221,10 @@ if __name__ == "__main__":
         else:
             run_data = call_fn(module, input_size, param_struct.device, num_runs, dtype=param_struct.dtype)
 
-        max_memory = torch.cuda.max_memory_allocated() / 1024 / 1024 / 1024
+        runtime = next(iter(run_data.values()))
+        benchmark_data.append({**param_struct.to_dict(), "time_ms": runtime})
 
-        b_data = {**param_struct.to_dict()}
-        if param_struct.timing_mode == TimingMode.WALL:
-            cell_name = "forward + backward"
-            b_data.update({cell_name: run_data[cell_name]})
-        elif param_struct.timing_mode == TimingMode.KERNEL:
-            fwd_cell = "forward_avg"
-            b_data.update({fwd_cell: run_data[fwd_cell]})
-            bwd_cell = "backward_avg"
-            b_data.update({bwd_cell: run_data[bwd_cell]})
-
-        b_data.update({"memory": max_memory})
-        benchmark_data.append(b_data)
         df = pd.DataFrame(benchmark_data)
-
-        torch.cuda.reset_peak_memory_stats()
 
         df.to_csv(file_name, index=False)
     print("Done!")
