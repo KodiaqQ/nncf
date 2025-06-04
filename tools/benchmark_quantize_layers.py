@@ -37,8 +37,8 @@ from tools.benchmark import run_wall
 from tools.benchmark import run_worker
 
 TIME_SCALES = {"ms": 1000}
-NBITS = 8
-GPU_RUNS_LOW_BATCH = 10000
+NBITS = 4
+GPU_RUNS_LOW_BATCH = 1000
 GPU_RUNS_HIGH_BATCH = 100
 CPU_RUNS = 100
 LOW_BATCH_INPUT_SIZE = [2048, 128256]
@@ -89,7 +89,7 @@ TEST_GRANULARITY: list[GranularityType] = [
     GranularityType.PER_GROUP,
 ]
 TEST_SYMMETRIC: list[bool] = [True, False]
-TEST_DEVICES: list[torch.device] = [torch.device("cuda"), torch.device("cpu")]
+TEST_DEVICES: list[torch.device] = [torch.device("cuda")]
 
 TEST_BATCHES: list[BatchDescriptor] = [
     BatchDescriptor(
@@ -109,7 +109,7 @@ TEST_EXEC_TYPES: list[ExecutionType] = [
 ]
 TEST_NARROW_RANGE: list[bool] = [False, True]
 TEST_TIMING_MODE: list[TimingMode] = [TimingMode.WALL, TimingMode.KERNEL]
-TEST_REFERENCE: list[bool] = [False, True]
+TEST_REFERENCE: list[bool] = [False]
 
 
 @dataclass
